@@ -12,21 +12,20 @@ int main(int argc, char* argv[]) {
            int rank,
            ccl::communicator& comm,
            sycl::queue& q) {
-            using namespace collective_runner;
             if (dtype == "int") {
-                run_collective<int>("allreduce", dtype, count, size, rank, comm, q, logpath,
+                collective_runner::run_collective<int>("allgather", dtype, count, size, rank, comm, q, logpath,
                     [&](int* s, int* r, size_t c, ccl::communicator& cm, sycl::queue& qu, const std::vector<ccl::event>& deps) {
-                        ccl::allreduce(s, r, c, ccl::reduction::sum, cm, qu, deps).wait();
+                        ccl::allgather(s, r, c, cm, qu, deps).wait();
                     });
             } else if (dtype == "float") {
-                run_collective<float>("allreduce", dtype, count, size, rank, comm, q, logpath,
+                collective_runner::run_collective<float>("allgather", dtype, count, size, rank, comm, q, logpath,
                     [&](float* s, float* r, size_t c, ccl::communicator& cm, sycl::queue& qu, const std::vector<ccl::event>& deps) {
-                        ccl::allreduce(s, r, c, ccl::reduction::sum, cm, qu, deps).wait();
+                        ccl::allgather(s, r, c, cm, qu, deps).wait();
                     });
             } else if (dtype == "double") {
-                run_collective<double>("allreduce", dtype, count, size, rank, comm, q, logpath,
+                collective_runner::run_collective<double>("allgather", dtype, count, size, rank, comm, q, logpath,
                     [&](double* s, double* r, size_t c, ccl::communicator& cm, sycl::queue& qu, const std::vector<ccl::event>& deps) {
-                        ccl::allreduce(s, r, c, ccl::reduction::sum, cm, qu, deps).wait();
+                        ccl::allgather(s, r, c, cm, qu, deps).wait();
                     });
             } else {
                 std::cerr << "Unsupported dtype: " << dtype << std::endl;

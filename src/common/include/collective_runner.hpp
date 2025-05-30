@@ -30,17 +30,22 @@ void run_collective(const std::string& coll_name,
                     const std::function<void(T*, T*, size_t, ccl::communicator&, sycl::queue&, const std::vector<ccl::event>&)>& op) {
     // allocate device buffers
     T* send_buf = sycl::malloc_device<T>(count, q);
-    T* recv_buf = sycl::malloc_device<T>(count, q);
+    T* recv_buf = nullptr;
+    
+    // For allgather, recv_buf needs to be count * size
+    size_t recv_count = (coll_name == "allgather") ? count * size : count;
+    recv_buf = sycl::malloc_device<T>(recv_count, q);
+    
     // initialize buffers
     auto e = q.submit([&](auto& h) {
         h.parallel_for(count, [=](auto id) {
             send_buf[id] = static_cast<T>(rank + id + 1);
+        });
+        h.parallel_for(recv_count, [=](auto id) {
             recv_buf[id] = static_cast<T>(-1);
         });
     });
-    // compute expected sum
-    T check_sum = static_cast<T>(0);
-    for (int i = 1; i <= size; ++i) check_sum += static_cast<T>(i);
+    
     // perform collective
     std::vector<ccl::event> deps{ccl::create_event(e)};
     auto t_start = std::chrono::high_resolution_clock::now();
@@ -48,31 +53,49 @@ void run_collective(const std::string& coll_name,
     auto t_end = std::chrono::high_resolution_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
     std::cout << "Rank " << rank << " time: " << elapsed_ms << " ms\n";
+    
     // correctness check
-    sycl::buffer<T> check_buf(count);
+    sycl::buffer<T> check_buf(recv_count);
     q.submit([&](auto& h) {
         sycl::accessor acc(check_buf, h, sycl::write_only);
-        h.parallel_for(count, [=](auto id) {
-            if (recv_buf[id] != static_cast<T>(check_sum + size * id)) acc[id] = static_cast<T>(-1);
+        h.parallel_for(recv_count, [=](auto id) {
+            T expected;
+            if (coll_name == "allreduce") {
+                // For allreduce: sum of all ranks for each element
+                T sum = static_cast<T>(0);
+                for (int r = 0; r < size; ++r) sum += static_cast<T>(r + id + 1);
+                expected = sum;
+            } else if (coll_name == "allgather") {
+                // For allgather: element id%count from rank id/count
+                int src_rank = id / count;
+                int elem_idx = id % count;
+                expected = static_cast<T>(src_rank + elem_idx + 1);
+            } else {
+                expected = recv_buf[id]; // Unknown collective, skip check
+            }
+            if (recv_buf[id] != expected) acc[id] = static_cast<T>(-1);
+            else acc[id] = static_cast<T>(0);
         });
     });
     q.wait_and_throw();
+    
     // print result
+    size_t i = 0;
+    bool passed = true;
     {
         sycl::host_accessor acc(check_buf, sycl::read_only);
-        size_t i = 0;
-        for (; i < count; ++i) {
+        for (; i < recv_count; ++i) {
             if (acc[i] == static_cast<T>(-1)) {
                 std::cout << "FAILED\n";
+                passed = false;
                 break;
             }
         }
-        if (i == count) std::cout << "PASSED\n";
+        if (passed) std::cout << "PASSED\n";
     }
     sycl::free(send_buf, q);
     sycl::free(recv_buf, q);
     // log results
-    bool passed = (i == count);
     Logger::append(logpath, {coll_name, dtype, std::to_string(count), std::to_string(size), std::to_string(rank), std::to_string(elapsed_ms), passed ? "PASSED" : "FAILED"});
 }
 
