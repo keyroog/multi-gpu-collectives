@@ -64,6 +64,10 @@ int main(int argc, char* argv[]) {
     parser.parse();
     std::string dtype = parser.get<std::string>("--dtype");
     size_t count = parser.get<size_t>("--count");
+    //default value for count
+    if (count == 0) {
+        count = 10 * 1024 * 1024; // Default value if not provided
+    }
 
     int size = 0;
     int rank = 0;
