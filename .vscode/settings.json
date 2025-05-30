@@ -5,6 +5,12 @@
     "string": "cpp",
     "vector": "cpp",
     "bitset": "cpp",
-    "unordered_map": "cpp"
+    "unordered_map": "cpp",
+    "__hash_table": "cpp",
+    "array": "cpp",
+    "initializer_list": "cpp",
+    "queue": "cpp",
+    "stack": "cpp",
+    "string_view": "cpp"
   }
 }
