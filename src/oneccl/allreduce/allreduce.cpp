@@ -7,7 +7,7 @@
 
 // Template wrapper for different data types
 template <typename T>
-void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q) {
+void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream) {
     // allocate device buffers
     auto send_buf = sycl::malloc_device<T>(count, q);
     auto recv_buf = sycl::malloc_device<T>(count, q);
@@ -22,10 +22,11 @@ void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sy
     T check_sum = static_cast<T>(0);
     for (int i = 1; i <= size; ++i) check_sum += static_cast<T>(i);
     // perform allreduce
-    std::vector<ccl::event> deps{ccl::create_event(e)};
+    std::vector<ccl::event> deps;
+    deps.push_back(ccl::create_event(e));
     auto attr = ccl::create_operation_attr<ccl::allreduce_attr>();
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::allreduce(send_buf, recv_buf, count, ccl::reduction::sum, comm, q, attr, deps).wait();
+    ccl::allreduce(send_buf, recv_buf, count, ccl::reduction::sum, comm, stream, attr, deps).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
     std::cout << "Rank " << rank << " allreduce time: " << elapsed_ms << " ms\n";
@@ -141,11 +142,11 @@ int main(int argc, char* argv[]) {
     auto stream = ccl::create_stream(q);
     // dispatch based on dtype
     if (dtype == "int") {
-        run_allreduce<int>(count, size, rank, comm, stream);
+        run_allreduce<int>(count, size, rank, comm, q, stream);
     } else if (dtype == "float") {
-        run_allreduce<float>(count, size, rank, comm, stream);
+        run_allreduce<float>(count, size, rank, comm, q, stream);
     } else if (dtype == "double") {
-        run_allreduce<double>(count, size, rank, comm, stream);
+        run_allreduce<double>(count, size, rank, comm, q, stream);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         exit(-1);
