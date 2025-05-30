@@ -3,11 +3,13 @@
 #include "oneapi/ccl.hpp"
 #include <chrono>                    // <<< aggiunto
 #include "../../common/include/arg_parser.hpp"
+#include "../../common/include/logger.hpp"
 #include <string>
 
 // Template wrapper for different data types
 template <typename T>
-void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream) {
+void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
+                  Logger& logger, const std::string& data_type) {
     // allocate device buffers
     auto send_buf = sycl::malloc_device<T>(count, q);
     auto recv_buf = sycl::malloc_device<T>(count, q);
@@ -28,8 +30,12 @@ void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sy
     auto t_start = std::chrono::high_resolution_clock::now();
     ccl::allreduce(send_buf, recv_buf, count, ccl::reduction::sum, comm, stream, attr, deps).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
-    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
-    std::cout << "Rank " << rank << " allreduce time: " << elapsed_ms << " ms\n";
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
+    
+    // Log dei risultati
+    logger.log_result(data_type, count, size, rank, elapsed_ms);
+    
+    std::cout << "Rank " << rank << " allreduce time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     // correctness check
     sycl::buffer<T> check_buf(count);
     q.submit([&](auto& h) {
@@ -61,10 +67,12 @@ void mpi_finalize() {
 
 int main(int argc, char* argv[]) {
     ArgParser parser(argc, argv);
-    parser.add<std::string>("--dtype").add<size_t>("--count");
+    parser.add<std::string>("--dtype").add<size_t>("--count").add<std::string>("--output");
     parser.parse();
     std::string dtype = parser.get<std::string>("--dtype");
     size_t count = parser.get<size_t>("--count");
+    std::string output_dir = parser.get<std::string>("--output");
+    
     //default value for count
     if (count == 0) {
         count = 10 * 1024 * 1024; // Default value if not provided
@@ -140,13 +148,17 @@ int main(int argc, char* argv[]) {
 
     /* create stream */
     auto stream = ccl::create_stream(q);
+    
+    // Crea il logger
+    Logger logger(output_dir, "oneccl", "allreduce");
+    
     // dispatch based on dtype
     if (dtype == "int") {
-        run_allreduce<int>(count, size, rank, comm, q, stream);
+        run_allreduce<int>(count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "float") {
-        run_allreduce<float>(count, size, rank, comm, q, stream);
+        run_allreduce<float>(count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "double") {
-        run_allreduce<double>(count, size, rank, comm, q, stream);
+        run_allreduce<double>(count, size, rank, comm, q, stream, logger, dtype);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         exit(-1);
