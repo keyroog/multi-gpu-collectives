@@ -35,7 +35,7 @@ private:
         return ss.str();
     }
     
-    std::string get_hostname() const {
+    std::string get_hostname_internal() const {
         char hostname_buf[256];
         if (gethostname(hostname_buf, sizeof(hostname_buf)) == 0) {
             return std::string(hostname_buf);
@@ -45,8 +45,8 @@ private:
     
     void initialize_node_info() {
         // Ottieni hostname
-        hostname = get_hostname();
-        
+        hostname = get_hostname_internal();
+
         // Ottieni informazioni MPI sui nodi
         int rank, size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
