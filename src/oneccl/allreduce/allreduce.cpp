@@ -8,8 +8,8 @@
 
 // Template wrapper for different data types
 template <typename T>
-void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
-                  Logger& logger, const std::string& data_type) {
+double run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
+                    Logger& logger, const std::string& data_type) {
     // allocate device buffers
     auto send_buf = sycl::malloc_device<T>(count, q);
     auto recv_buf = sycl::malloc_device<T>(count, q);
@@ -32,10 +32,11 @@ void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sy
     auto t_end = std::chrono::high_resolution_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
-    // Log dei risultati
+    // Log dei risultati individuali
     logger.log_result(data_type, count, size, rank, elapsed_ms);
     
     std::cout << "Rank " << rank << " allreduce time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
+    
     // correctness check
     sycl::buffer<T> check_buf(count);
     q.submit([&](auto& h) {
@@ -49,6 +50,14 @@ void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sy
     {
         sycl::host_accessor acc(check_buf, sycl::read_only);
         size_t i = 0;
+        for (; i < count; ++i) if (acc[i] == static_cast<T>(-1)) { std::cout << "FAILED\n"; break; }
+        if (i == count) std::cout << "PASSED\n";
+    }
+    sycl::free(send_buf, q);
+    sycl::free(recv_buf, q);
+    
+    return elapsed_ms;  // Ritorna il tempo per la raccolta delle statistiche
+}
         for (; i < count; ++i) if (acc[i] == static_cast<T>(-1)) { std::cout << "FAILED\n"; break; }
         if (i == count) std::cout << "PASSED\n";
     }
@@ -166,16 +175,48 @@ int main(int argc, char* argv[]) {
         logger.log_gpu_topology_info(rank);
     }
     
+    double my_time = 0.0;
+    
     // dispatch based on dtype
     if (dtype == "int") {
-        run_allreduce<int>(count, size, rank, comm, q, stream, logger, dtype);
+        my_time = run_allreduce<int>(count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "float") {
-        run_allreduce<float>(count, size, rank, comm, q, stream, logger, dtype);
+        my_time = run_allreduce<float>(count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "double") {
-        run_allreduce<double>(count, size, rank, comm, q, stream, logger, dtype);
+        my_time = run_allreduce<double>(count, size, rank, comm, q, stream, logger, dtype);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         exit(-1);
+    }
+    
+    // Raccolta delle statistiche collettive per calcolare goodput
+    std::vector<double> all_times(size);
+    MPI_Allgather(&my_time, 1, MPI_DOUBLE, all_times.data(), 1, MPI_DOUBLE, MPI_COMM_WORLD);
+    
+    // Calcola le statistiche collettive e mostra il goodput (solo rank 0)
+    if (rank == 0) {
+        Logger::CollectiveStats stats = Logger::calculate_collective_stats(all_times);
+        
+        // Log del summary tradizionale
+        logger.log_summary(dtype, count, size, stats.min_time_ms, stats.max_time_ms, stats.avg_time_ms);
+        
+        // Log delle statistiche avanzate con analisi della varianza
+        std::string context = "Single-Node";
+        if (size > 8) {  // Euristica: più di 8 ranks suggerisce scenario multi-nodo
+            context = "Multi-Node";
+        }
+        logger.log_collective_stats(dtype, count, stats, context);
+        
+        std::cout << "\n=== GOODPUT ANALYSIS ===" << std::endl;
+        std::cout << "Worst-rank time (Goodput): " << std::fixed << std::setprecision(3) << stats.goodput_ms << " ms" << std::endl;
+        std::cout << "Best-rank time: " << std::fixed << std::setprecision(3) << stats.min_time_ms << " ms" << std::endl;
+        std::cout << "Performance variation: " << std::fixed << std::setprecision(1) 
+                  << ((stats.max_time_ms - stats.min_time_ms) / stats.avg_time_ms * 100.0) << "%" << std::endl;
+        
+        if (stats.max_time_ms > stats.min_time_ms * 1.1) {  // > 10% variation
+            std::cout << "WARNING: High performance variation detected!" << std::endl;
+            std::cout << "  This may indicate load imbalance, network issues, or topology problems." << std::endl;
+        }
     }
     
     // Final synchronization and summary (rank 0 only)
