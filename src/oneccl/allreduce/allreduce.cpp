@@ -149,8 +149,8 @@ int main(int argc, char* argv[]) {
     /* create stream */
     auto stream = ccl::create_stream(q);
     
-    // Crea il logger
-    Logger logger(output_dir, "oneccl", "allreduce");
+    // Crea il logger con informazioni sui rank
+    Logger logger(output_dir, "oneccl", "allreduce", rank, size);
     
     // dispatch based on dtype
     if (dtype == "int") {
