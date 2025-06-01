@@ -205,17 +205,35 @@ public:
         }
         
         std::string filename = get_filename(data_type);
-        bool is_new_file = !file_exists(filename);
         
+        // Sincronizzazione MPI per gestire la scrittura dell'header
+        // Solo il rank 0 controlla e scrive l'header se necessario
+        int needs_header = 0;
+        if (rank == 0) {
+            bool is_new_file = !file_exists(filename);
+            needs_header = is_new_file ? 1 : 0;
+        }
+        
+        // Broadcast del flag header a tutti i rank
+        MPI_Bcast(&needs_header, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        
+        // Solo il rank 0 scrive l'header se necessario
+        if (needs_header && rank == 0) {
+            std::ofstream header_file(filename, std::ios::app);
+            if (header_file.is_open()) {
+                write_header(header_file);
+                header_file.close();
+            }
+        }
+        
+        // Sincronizzazione per assicurare che l'header sia scritto prima dei dati
+        MPI_Barrier(MPI_COMM_WORLD);
+        
+        // Ora tutti i rank possono scrivere i loro dati
         std::ofstream file(filename, std::ios::app);
         if (!file.is_open()) {
             std::cerr << "Warning: Could not open log file: " << filename << std::endl;
             return;
-        }
-        
-        // Scrivi header se è un nuovo file
-        if (is_new_file) {
-            write_header(file);
         }
         
         // Calcola la dimensione in bytes (approssimativa)
