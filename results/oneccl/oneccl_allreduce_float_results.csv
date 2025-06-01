@@ -1,5 +1,0 @@
-timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,time_ms
-20250530_125528,oneccl,allreduce,float,4096,1024,2,1,6.066
-20250530_125528,oneccl,allreduce,float,4096,1024,2,0,9.108
-20250530_125550,oneccl,allreduce,float,4096,1024,2,0,1.463
-20250530_125550,oneccl,allreduce,float,4096,1024,2,1,3.809

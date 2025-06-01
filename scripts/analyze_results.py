@@ -24,8 +24,18 @@ def analyze_results(results_dir):
     for file in csv_files:
         try:
             df = pd.read_csv(file)
+            
+            # Retrocompatibilità: aggiungi colonne mancanti se non esistono
+            if 'run_number' not in df.columns:
+                df['run_number'] = range(1, len(df) + 1)
+                print(f"✅ {os.path.basename(file)}: {len(df)} righe (aggiunta colonna run_number)")
+            else:
+                print(f"✅ {os.path.basename(file)}: {len(df)} righe")
+            
+            if 'environment' not in df.columns:
+                df['environment'] = 'legacy'
+            
             all_data.append(df)
-            print(f"✅ {os.path.basename(file)}: {len(df)} righe")
         except Exception as e:
             print(f"❌ Errore nel leggere {file}: {e}")
     

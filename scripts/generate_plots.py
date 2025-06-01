@@ -7,6 +7,7 @@ Legge i file CSV generati dal logger e crea grafici per analizzare le performanc
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 import argparse
 import os
 import glob
@@ -24,6 +25,17 @@ def load_results(results_dir):
     for file in csv_files:
         try:
             df = pd.read_csv(file)
+            
+            # Retrocompatibilità: aggiungi colonne mancanti se non esistono
+            if 'run_number' not in df.columns:
+                # Per i vecchi file, assegna numeri progressivi basati sull'ordine
+                df['run_number'] = range(1, len(df) + 1)
+                print(f"Aggiunta colonna run_number ai dati legacy: {file}")
+            
+            if 'environment' not in df.columns:
+                df['environment'] = 'legacy'
+                print(f"Aggiunta colonna environment ai dati legacy: {file}")
+            
             dataframes.append(df)
             print(f"Caricato: {file} ({len(df)} righe)")
         except Exception as e:
@@ -192,6 +204,67 @@ def plot_scaling_analysis(df, output_dir):
                 print(f"Grafico salvato: {filepath}")
                 plt.close()
 
+def plot_run_consistency(df, output_dir):
+    """Analizza la consistenza tra diverse esecuzioni."""
+    
+    if 'run_number' not in df.columns:
+        print("Colonna run_number non trovata, saltando analisi di consistenza")
+        return
+    
+    # Raggruppa per library, collective, data_type, message_size_elements
+    grouped = df.groupby(['library', 'collective', 'data_type', 'message_size_elements'])
+    
+    libraries = df['library'].unique()
+    collectives = df['collective'].unique()
+    data_types = df['data_type'].unique()
+    
+    for lib in libraries:
+        for collective in collectives:
+            for dtype in data_types:
+                subset = df[
+                    (df['library'] == lib) & 
+                    (df['collective'] == collective) & 
+                    (df['data_type'] == dtype)
+                ]
+                
+                if subset.empty:
+                    continue
+                
+                # Controlla se ci sono multiple esecuzioni per alcuni message sizes
+                run_counts = subset.groupby('message_size_elements')['run_number'].nunique()
+                if run_counts.max() <= 1:
+                    continue  # Salta se non ci sono multiple esecuzioni
+                
+                plt.figure(figsize=(12, 8))
+                
+                # Plot per diverse message sizes con multiple esecuzioni
+                message_sizes = sorted(subset['message_size_elements'].unique())
+                colors = plt.cm.tab10(np.linspace(0, 1, len(message_sizes)))
+                
+                for i, msg_size in enumerate(message_sizes):
+                    size_data = subset[subset['message_size_elements'] == msg_size]
+                    if len(size_data) > 1:  # Solo se abbiamo più esecuzioni
+                        plt.scatter(size_data['run_number'], size_data['time_ms'], 
+                                  color=colors[i], label=f'{msg_size} elements', alpha=0.7)
+                        
+                        # Aggiungi linea di tendenza se ci sono abbastanza punti
+                        if len(size_data) >= 3:
+                            plt.plot(size_data['run_number'], size_data['time_ms'], 
+                                   color=colors[i], alpha=0.3, linewidth=1)
+                
+                plt.xlabel('Run Number')
+                plt.ylabel('Time (ms)')
+                plt.title(f'{lib.upper()} - {collective.capitalize()} ({dtype}): Run Consistency')
+                plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                plt.grid(True, alpha=0.3)
+                
+                # Salva il grafico
+                filename = f'{lib}_{collective}_{dtype}_run_consistency.png'
+                filepath = os.path.join(output_dir, filename)
+                plt.savefig(filepath, dpi=300, bbox_inches='tight')
+                print(f"Grafico salvato: {filepath}")
+                plt.close()
+
 def generate_summary_report(df, output_dir):
     """Genera un report di riepilogo."""
     
@@ -255,6 +328,7 @@ def main():
     plot_performance_by_message_size(df, args.output)
     plot_performance_by_data_type(df, args.output)
     plot_scaling_analysis(df, args.output)
+    plot_run_consistency(df, args.output)
     
     # Genera report di riepilogo
     generate_summary_report(df, args.output)

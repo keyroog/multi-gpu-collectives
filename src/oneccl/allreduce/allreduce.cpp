@@ -89,6 +89,15 @@ int main(int argc, char* argv[]) {
 
     atexit(mpi_finalize);
 
+    // Inizio di una nuova esecuzione completa del benchmark (solo rank 0)
+    if (rank == 0) {
+        Logger::start_new_run();
+        std::cout << "=== Starting benchmark run #" << Logger::get_current_run_id() << " ===" << std::endl;
+    }
+    
+    // Sincronizza tutti i ranks prima di procedere
+    MPI_Barrier(MPI_COMM_WORLD);
+
     /* find and initialize Level-Zero devices and queues */
     std::vector<sycl::device> devices;
     std::vector<sycl::queue> queues;
@@ -152,6 +161,11 @@ int main(int argc, char* argv[]) {
     // Crea il logger
     Logger logger(output_dir, "oneccl", "allreduce");
     
+    // Log GPU topology information (only rank 0 to avoid spam)
+    if (rank == 0) {
+        logger.log_gpu_topology_info(rank);
+    }
+    
     // dispatch based on dtype
     if (dtype == "int") {
         run_allreduce<int>(count, size, rank, comm, q, stream, logger, dtype);
@@ -163,5 +177,12 @@ int main(int argc, char* argv[]) {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         exit(-1);
     }
+    
+    // Final synchronization and summary (rank 0 only)
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        std::cout << "=== Completed benchmark run #" << Logger::get_current_run_id() << " ===" << std::endl;
+    }
+    
     return 0;
 }
