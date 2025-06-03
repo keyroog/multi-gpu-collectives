@@ -2,8 +2,17 @@
 #include "oneapi/ccl.hpp"
 #include <chrono>
 #include "../../common/include/arg_parser.hpp"
-#include "../../common/include/logger.hpp"
-#include <string>
+#include "../../common/include/log        }
+    }
+    
+    // Free device memory for counts and displacements
+    sycl::free(d_send_counts, q);
+    sycl::free(d_recv_counts, q);
+    sycl::free(d_recv_displs, q);
+    
+    sycl::free(send_buf, q);
+    sycl::free(recv_buf, q);
+}include <string>
 #include <iomanip>
 #include <vector>
 #include <numeric>
@@ -41,8 +50,12 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
     auto send_buf = sycl::malloc_device<T>(total_send, q);
     auto recv_buf = sycl::malloc_device<T>(total_recv, q);
     
+    // Copy send_counts to device memory for use in kernel
+    auto d_send_counts = sycl::malloc_device<size_t>(size, q);
+    q.memcpy(d_send_counts, send_counts.data(), size * sizeof(size_t)).wait();
+    
     // initialize send buffer with rank and destination specific data
-    auto e = q.submit([&](auto& h) {
+    auto e1 = q.submit([&](auto& h) {
         h.parallel_for(total_send, [=](auto global_id) {
             // Find which destination this element belongs to
             size_t cumulative = 0;
@@ -50,20 +63,22 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
             size_t local_id = 0;
             
             for (int d = 0; d < size; ++d) {
-                if (global_id < cumulative + send_counts[d]) {
+                if (global_id < cumulative + d_send_counts[d]) {
                     dest_rank = d;
                     local_id = global_id - cumulative;
                     break;
                 }
-                cumulative += send_counts[d];
+                cumulative += d_send_counts[d];
             }
             
             // Data pattern: sender*100000 + dest*10000 + local_id
             // This allows us to verify both sender and intended destination
             send_buf[global_id] = static_cast<T>(rank * 100000 + dest_rank * 10000 + local_id);
         });
-        
-        // Initialize recv buffer to detect errors
+    });
+    
+    // Initialize recv buffer to detect errors
+    auto e2 = q.submit([&](auto& h) {
         h.parallel_for(total_recv, [=](auto id) {
             recv_buf[id] = static_cast<T>(-1);
         });
@@ -71,7 +86,8 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
     
     // perform alltoallv
     std::vector<ccl::event> deps;
-    deps.push_back(ccl::create_event(e));
+    deps.push_back(ccl::create_event(e1));
+    deps.push_back(ccl::create_event(e2));
     auto attr = ccl::create_operation_attr<ccl::alltoallv_attr>();
     
     auto t_start = std::chrono::high_resolution_clock::now();
@@ -88,14 +104,21 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
     
     // correctness check
     // Verify data from each source rank is correct and in the right position
+    // First, copy recv_counts and recv_displs to device memory
+    auto d_recv_counts = sycl::malloc_device<size_t>(size, q);
+    auto d_recv_displs = sycl::malloc_device<size_t>(size, q);
+    
+    q.memcpy(d_recv_counts, recv_counts.data(), size * sizeof(size_t)).wait();
+    q.memcpy(d_recv_displs, recv_displs.data(), size * sizeof(size_t)).wait();
+    
     sycl::buffer<T> check_buf(1);  // Single flag for pass/fail
     q.submit([&](auto& h) {
         sycl::accessor acc(check_buf, h, sycl::write_only);
         h.single_task([=]() {
             bool passed = true;
             for (int src_rank = 0; src_rank < size && passed; ++src_rank) {
-                size_t src_count = recv_counts[src_rank];
-                size_t src_offset = recv_displs[src_rank];
+                size_t src_count = d_recv_counts[src_rank];
+                size_t src_offset = d_recv_displs[src_rank];
                 
                 for (size_t i = 0; i < src_count && passed; ++i) {
                     // Expected: src_rank sent (src_rank*100000 + rank*10000 + i) to this rank
@@ -151,6 +174,10 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
                       << ", receives " << rank_total_recv << " elements\n";
         }
     }
+    
+    // Free device memory for counts and displacements
+    sycl::free(d_recv_counts, q);
+    sycl::free(d_recv_displs, q);
     
     sycl::free(send_buf, q);
     sycl::free(recv_buf, q);

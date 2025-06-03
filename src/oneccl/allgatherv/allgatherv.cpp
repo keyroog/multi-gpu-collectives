@@ -36,13 +36,15 @@ void run_allgatherv(size_t base_count, int size, int rank, ccl::communicator& co
     auto recv_buf = sycl::malloc_device<T>(total_recv_count, q);
     
     // initialize send buffer with rank-specific data
-    auto e = q.submit([&](auto& h) {
+    auto e1 = q.submit([&](auto& h) {
         h.parallel_for(send_count, [=](auto id) {
             // Each rank sends unique data: rank*10000 + id
             send_buf[id] = static_cast<T>(rank * 10000 + id);
         });
-        
-        // Initialize recv buffer to detect errors
+    });
+    
+    // Initialize recv buffer to detect errors
+    auto e2 = q.submit([&](auto& h) {
         h.parallel_for(total_recv_count, [=](auto id) {
             recv_buf[id] = static_cast<T>(-1);
         });
@@ -50,7 +52,8 @@ void run_allgatherv(size_t base_count, int size, int rank, ccl::communicator& co
     
     // perform allgatherv
     std::vector<ccl::event> deps;
-    deps.push_back(ccl::create_event(e));
+    deps.push_back(ccl::create_event(e1));
+    deps.push_back(ccl::create_event(e2));
     auto attr = ccl::create_operation_attr<ccl::allgatherv_attr>();
     
     auto t_start = std::chrono::high_resolution_clock::now();
