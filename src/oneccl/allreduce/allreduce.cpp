@@ -1,6 +1,5 @@
-#include <iostream>
-#include <mpi.h>
-#include "oneapi/ccl.hpp"
+#include "../common/oneccl_context.hpp"
+#include "oneapi/ccl.hpp"  // retain for run_allreduce
 #include <chrono>                    // <<< aggiunto
 #include "../../common/include/arg_parser.hpp"
 #include "../../common/include/logger.hpp"
@@ -56,15 +55,6 @@ void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sy
     sycl::free(recv_buf, q);
 }
 
-void mpi_finalize() {
-    int is_finalized = 0;
-    MPI_Finalized(&is_finalized);
-
-    if (!is_finalized) {
-        MPI_Finalize();
-    }
-}
-
 int main(int argc, char* argv[]) {
     ArgParser parser(argc, argv);
     parser.add<std::string>("--dtype").add<size_t>("--count").add<std::string>("--output");
@@ -78,80 +68,15 @@ int main(int argc, char* argv[]) {
         count = 10 * 1024 * 1024; // Default value if not provided
     }
 
-    int size = 0;
-    int rank = 0;
-
-    ccl::init();
-
-    MPI_Init(nullptr, nullptr);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-    atexit(mpi_finalize);
-
-    /* find and initialize Level-Zero devices and queues */
-    std::vector<sycl::device> devices;
-    std::vector<sycl::queue> queues;
-    auto platform_list = sycl::platform::get_platforms();
-    for (const auto &platform : platform_list) {
-        auto platform_name = platform.get_info<sycl::info::platform::name>();
-        bool is_level_zero = platform_name.find("Level-Zero") != std::string::npos;
-        if (is_level_zero) {
-            std::cout << "Platform_name is:  " << platform_name << std::endl;
-            auto device_list = platform.get_devices();
-            for (const auto &device : device_list) {
-                if (device.is_gpu()) {
-                    devices.push_back(device);
-                }
-            }
-        }
-    }
-
-    if (devices.size() < size) {
-        std::cerr << "Not enough devices for all ranks" << std::endl;
-        exit(-1);
-    }
-
-    sycl::context context(devices);
-    for (size_t i = 0; i < devices.size(); ++i) {
-        if (i == rank) { /* Only create a queue for the current rank's device */
-            queues.push_back(sycl::queue(context, devices[i], {sycl::property::queue::in_order()}));
-            break;
-        }
-    }
-
-    if (queues.empty()) {
-        std::cerr << "No queue created for rank " << rank << std::endl;
-        exit(-1);
-    }
-
-    /* Use the only queue in the queues vector for the current rank */
-    sycl::queue& q = queues[0];
-
-    /* create kvs */
-    ccl::shared_ptr_class<ccl::kvs> kvs;
-    ccl::kvs::address_type main_addr;
-    if (rank == 0) {
-        kvs = ccl::create_main_kvs();
-        main_addr = kvs->get_address();
-        MPI_Bcast((void*)main_addr.data(), main_addr.size(), MPI_BYTE, 0, MPI_COMM_WORLD);
-    }
-    else {
-        MPI_Bcast((void*)main_addr.data(), main_addr.size(), MPI_BYTE, 0, MPI_COMM_WORLD);
-        kvs = ccl::create_kvs(main_addr);
-    }
-
-    /* create communicator */
-    auto dev = ccl::create_device(q.get_device());
-    auto ctx = ccl::create_context(q.get_context());
-    auto comm = ccl::create_communicator(size, rank, dev, ctx, kvs);
-
-    /* create stream */
-    auto stream = ccl::create_stream(q);
-    
-    // Crea il logger
-    Logger logger(output_dir, "oneccl", "allreduce");
-    
+    // Initialize OneCCL context (MPI, CCL, devices, communicator, logger)
+    auto ctx = init_oneccl(output_dir, "allreduce");
+    int size = ctx.size;
+    int rank = ctx.rank;
+    auto& q = ctx.q;
+    auto& comm = ctx.comm;
+    auto& stream = ctx.stream;
+    auto& logger = ctx.logger;
+     
     // dispatch based on dtype
     if (dtype == "int") {
         run_allreduce<int>(count, size, rank, comm, q, stream, logger, dtype);
