@@ -2,7 +2,7 @@
 
 #include <mpi.h>
 #include <oneapi/ccl.hpp>
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -70,5 +70,5 @@ inline OneCCLContext init_oneccl(const std::string& output_dir, const std::strin
     // Initialize logger
     Logger logger(output_dir, "oneccl", collective_name);
 
-    return OneCCLContext{size, rank, q, comm, stream, logger};
+    return OneCCLContext{size, rank, std::move(q), std::move(comm), std::move(stream), std::move(logger)};
 }
