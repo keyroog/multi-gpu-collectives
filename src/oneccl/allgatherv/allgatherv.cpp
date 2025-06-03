@@ -67,14 +67,21 @@ void run_allgatherv(size_t base_count, int size, int rank, ccl::communicator& co
     
     // correctness check
     // Verify data from each source rank is in the correct position
+    // First, copy recv_counts and recv_displs to device memory
+    auto d_recv_counts = sycl::malloc_device<size_t>(size, q);
+    auto d_recv_displs = sycl::malloc_device<size_t>(size, q);
+    
+    q.memcpy(d_recv_counts, recv_counts.data(), size * sizeof(size_t)).wait();
+    q.memcpy(d_recv_displs, recv_displs.data(), size * sizeof(size_t)).wait();
+    
     sycl::buffer<T> check_buf(1);  // Single flag for pass/fail
     q.submit([&](auto& h) {
         sycl::accessor acc(check_buf, h, sycl::write_only);
         h.single_task([=]() {
             bool passed = true;
             for (int src_rank = 0; src_rank < size && passed; ++src_rank) {
-                size_t src_count = recv_counts[src_rank];
-                size_t src_offset = recv_displs[src_rank];
+                size_t src_count = d_recv_counts[src_rank];
+                size_t src_offset = d_recv_displs[src_rank];
                 
                 for (size_t i = 0; i < src_count && passed; ++i) {
                     T expected = static_cast<T>(src_rank * 10000 + i);
@@ -107,6 +114,10 @@ void run_allgatherv(size_t base_count, int size, int rank, ccl::communicator& co
         }
         std::cout << "  Total: " << total_recv_count << " elements\n";
     }
+    
+    // Free device memory for counts and displacements
+    sycl::free(d_recv_counts, q);
+    sycl::free(d_recv_displs, q);
     
     sycl::free(send_buf, q);
     sycl::free(recv_buf, q);
