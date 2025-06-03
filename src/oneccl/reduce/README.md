@@ -42,7 +42,7 @@ mpirun -n <num_processes> ./reduce --dtype <type> --count <elements> --output <d
 - `--dtype`: Data type (int, float, double)
 - `--count`: Number of elements to reduce (default: 10M)
 - `--output`: Output directory for logging
-- `--root`: Root rank that receives the reduced result (default: 0, must be valid rank 0 ≤ root < size)
+- `--root`: Root rank that receives the reduced result (default: 0, optional, must be valid rank 0 ≤ root < size)
 
 ### Examples
 

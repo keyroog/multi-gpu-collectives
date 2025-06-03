@@ -76,13 +76,21 @@ void run_broadcast(size_t count, int size, int rank, ccl::communicator& comm, sy
 
 int main(int argc, char* argv[]) {
     ArgParser parser(argc, argv);
-    parser.add<std::string>("--dtype").add<size_t>("--count").add<std::string>("--output").add<int>("--root");
+    parser.add<std::string>("--dtype").add<size_t>("--count").add<std::string>("--output");
     parser.parse();
     
     std::string dtype = parser.get<std::string>("--dtype");
     size_t count = parser.get<size_t>("--count");
     std::string output_dir = parser.get<std::string>("--output");
-    int root_rank = parser.get<int>("--root");
+    
+    // Handle root rank with default value
+    int root_rank = 0; // Default to rank 0
+    try {
+        root_rank = parser.get<int>("--root");
+    } catch (const std::runtime_error&) {
+        // Use default value if --root not provided
+        root_rank = 0;
+    }
     
     // default values
     if (count == 0) {

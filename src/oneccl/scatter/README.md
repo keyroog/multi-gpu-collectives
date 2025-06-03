@@ -48,7 +48,7 @@ mpirun -n <num_processes> ./scatter --dtype <type> --count <elements> --output <
 - `--dtype`: Data type (int, float, double)
 - `--count`: Number of elements per rank (default: 10M)
 - `--output`: Output directory for logging
-- `--root`: Root rank that scatters the data (default: 0, must be valid rank 0 ≤ root < size)
+- `--root`: Root rank that scatters the data (default: 0, optional, must be valid rank 0 ≤ root < size)
 
 ### Examples
 
