@@ -2,17 +2,9 @@
 #include "oneapi/ccl.hpp"
 #include <chrono>
 #include "../../common/include/arg_parser.hpp"
-#include "../../common/include/log        }
-    }
-    
-    // Free device memory for counts and displacements
-    sycl::free(d_send_counts, q);
-    sycl::free(d_recv_counts, q);
-    sycl::free(d_recv_displs, q);
-    
-    sycl::free(send_buf, q);
-    sycl::free(recv_buf, q);
-}include <string>
+#include "../../common/include/logger.hpp"
+#include <iostream>
+#include <string>
 #include <iomanip>
 #include <vector>
 #include <numeric>
@@ -176,6 +168,7 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
     }
     
     // Free device memory for counts and displacements
+    sycl::free(d_send_counts, q);
     sycl::free(d_recv_counts, q);
     sycl::free(d_recv_displs, q);
     
