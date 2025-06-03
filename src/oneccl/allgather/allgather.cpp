@@ -1,7 +1,7 @@
 #include "../../common/include/arg_parser.hpp"
 #include "../../common/include/logger.hpp"
 #include "../../common/include/oneccl_setup.hpp"
-#include "../../common/include/allreduce_benchmark.hpp"
+#include "../../common/include/allgather_benchmark.hpp"
 #include <string>
 
 template<typename T>
@@ -9,7 +9,7 @@ void run_benchmark(size_t count, const std::string& data_type, Logger& logger) {
     OneCCLSetup setup;
     auto result = setup.initialize();
     
-    AllReduceBenchmark<T> benchmark(count, result, logger, data_type);
+    AllGatherBenchmark<T> benchmark(count, result, logger, data_type);
     benchmark.run();
 }
 
@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Crea il logger
-    Logger logger(output_dir, "oneccl", "allreduce");
+    Logger logger(output_dir, "oneccl", "allgather");
     
     // dispatch based on dtype
     if (dtype == "int") {
