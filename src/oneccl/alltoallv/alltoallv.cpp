@@ -178,12 +178,18 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
 
 int main(int argc, char* argv[]) {
     ArgParser parser(argc, argv);
-    parser.add<std::string>("--dtype").add<size_t>("--count").add<std::string>("--output");
+    parser.add<std::string>("--dtype").add<size_t>("--count");
     parser.parse();
-    
+
     std::string dtype = parser.get<std::string>("--dtype");
     size_t base_count = parser.get<size_t>("--count");
-    std::string output_dir = parser.get<std::string>("--output");
+
+    std::string output_dir;
+    try {
+        output_dir = parser.get<std::string>("--output");
+    } catch (const std::runtime_error&) {
+        output_dir = "";
+    }
     
     // default value for base_count (smaller due to O(n²) scaling with variable sizes)
     if (base_count == 0) {
