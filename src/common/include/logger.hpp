@@ -120,8 +120,9 @@ private:
         return result;
     }
     
-    std::string get_filename(const std::string& data_type) const {
-        return output_dir + "/" + library_name + "_" + collective_name + "_" + data_type + "_results.csv";
+    std::string get_filename(const std::string& data_type, size_t message_size_elements) const {
+        return output_dir + "/" + library_name + "_" + collective_name + "_" +
+               data_type + "_" + std::to_string(message_size_elements) + "_results.csv";
     }
     
     void ensure_directory_exists() const {
@@ -219,7 +220,7 @@ public:
             return;
         }
         
-        std::string filename = get_filename(data_type);
+        std::string filename = get_filename(data_type, message_size_elements);
         
         // Sincronizzazione MPI per gestire la scrittura dell'header
         // Solo il rank 0 controlla e scrive l'header se necessario
