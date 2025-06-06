@@ -85,7 +85,7 @@ icpx -o allreduce allreduce.cpp -lccl -lmpi -fsycl
 mpirun -n 4 ./allreduce --dtype float --count 1000000 --output ./results
 
 # View results
-cat ./results/oneccl_allreduce_float_results.csv
+cat ./results/oneccl_allreduce_float_1000000_results.csv
 ```
 
 ### Running All Operations
