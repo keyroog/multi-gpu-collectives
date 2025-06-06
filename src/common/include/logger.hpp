@@ -13,6 +13,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cstring>
+extern char **environ;
 
 class Logger {
 private:
@@ -26,6 +27,7 @@ private:
     int node_id;
     int total_nodes;
     bool is_multi_node;
+    std::string ccl_env_vars;
     
     std::string get_timestamp() const {
         auto now = std::chrono::system_clock::now();
@@ -104,6 +106,18 @@ private:
             }
             std::cout << std::endl;
         }
+    }
+
+    std::string capture_ccl_env() const {
+        std::string result;
+        for (char **env = environ; env && *env; ++env) {
+            std::string entry(*env);
+            if (entry.rfind("CCL_", 0) == 0) {
+                if (!result.empty()) result += ";";
+                result += entry;
+            }
+        }
+        return result;
     }
     
     std::string get_filename(const std::string& data_type) const {
@@ -187,7 +201,7 @@ private:
     }
     
     void write_header(std::ofstream& file) const {
-        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms\n";
+        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms,ccl_env_vars\n";
     }
 
 public:
@@ -195,6 +209,7 @@ public:
         : output_dir(output_dir), library_name(library_name), collective_name(collective_name) {
         ensure_directory_exists();
         initialize_node_info();
+        ccl_env_vars = capture_ccl_env();
         run_id = get_next_run_id();
     }
     
@@ -258,7 +273,7 @@ public:
              << total_nodes << ","
              << (is_multi_node ? "true" : "false") << ","
              << run_id << ","
-             << std::fixed << std::setprecision(3) << time_ms << "\n";
+             << std::fixed << std::setprecision(3) << time_ms << ",\"" << ccl_env_vars << "\"\n";
         
         file.close();
         
@@ -282,6 +297,7 @@ public:
         std::cout << "Total Nodes: " << total_nodes << std::endl;
         std::cout << "Multi-Node: " << (is_multi_node ? "Yes" : "No") << std::endl;
         std::cout << "Run ID: " << run_id << std::endl;
+        std::cout << "CCL Env: " << ccl_env_vars << std::endl;
         std::cout << "Min Time: " << std::fixed << std::setprecision(3) << min_time_ms << " ms" << std::endl;
         std::cout << "Max Time: " << std::fixed << std::setprecision(3) << max_time_ms << " ms" << std::endl;
         std::cout << "Avg Time: " << std::fixed << std::setprecision(3) << avg_time_ms << " ms" << std::endl;
@@ -309,6 +325,6 @@ public:
         std::cout << "  --output <path>  : Directory path for logging results (optional)" << std::endl;
         std::cout << "  If --output is not specified, results will only be printed to console" << std::endl;
         std::cout << "\nOutput format: CSV files with columns:" << std::endl;
-        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms" << std::endl;
+        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms, ccl_env_vars" << std::endl;
     }
 };
