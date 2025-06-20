@@ -83,7 +83,7 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
     auto attr = ccl::create_operation_attr<ccl::alltoallv_attr>();
     
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::alltoallv(send_buf, send_counts, send_displs, recv_buf, recv_counts, recv_displs, comm, stream, attr, deps).wait();
+    ccl::alltoallv(send_buf, send_counts, recv_buf, recv_counts, comm, stream, attr, deps).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
