@@ -27,8 +27,8 @@ private:
     int node_id;
     int total_nodes;
     bool is_multi_node;
-    std::string env_var_prefix;
-    std::string env_vars;
+    // std::string env_var_prefix;
+    // std::string env_vars;
 
     std::string get_timestamp() const {
         auto now = std::chrono::system_clock::now();
@@ -109,17 +109,17 @@ private:
         }
     }
 
-    std::string capture_env() const {
-        std::string result;
-        for (char **env = environ; env && *env; ++env) {
-            std::string entry(*env);
-            if (entry.rfind(env_var_prefix, 0) == 0) {
-                if (!result.empty()) result += ";";
-                result += entry;
-            }
-        }
-        return result;
-    }
+    // std::string capture_env() const {
+    //     std::string result;
+    //     for (char **env = environ; env && *env; ++env) {
+    //         std::string entry(*env);
+    //         if (entry.rfind(env_var_prefix, 0) == 0) {
+    //             if (!result.empty()) result += ";";
+    //             result += entry;
+    //         }
+    //     }
+    //     return result;
+    // }
     
     std::string get_filename(const std::string& data_type, size_t message_size_elements) const {
         return output_dir + "/" + library_name + "_" + collective_name + "_" +
@@ -203,7 +203,7 @@ private:
     }
     
     void write_header(std::ofstream& file) const {
-        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms,env_vars\n";
+        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms\n";
     }
 
 public:
@@ -213,18 +213,21 @@ public:
         initialize_node_info();
         // set default prefix based on library
         if (library_name.find("nccl") != std::string::npos || library_name.find("NCCL") != std::string::npos)
-            env_var_prefix = "NCCL_";
+            // env_var_prefix = "NCCL_";
+            ;
         else if (library_name.find("ccl") != std::string::npos || library_name.find("CCL") != std::string::npos)
-            env_var_prefix = "CCL_";
+            // env_var_prefix = "CCL_";
+            ;
         else
-            env_var_prefix = "NCCL_"; // fallback
-        env_vars = capture_env();
+            // env_var_prefix = "NCCL_"; // fallback
+            ;
+        // env_vars = capture_env();
         run_id = get_next_run_id();
     }
     // optionally override which prefix to capture
     void set_env_prefix(const std::string& prefix) {
-        env_var_prefix = prefix;
-        env_vars = capture_env();
+        // env_var_prefix = prefix;
+        // env_vars = capture_env();
     }
     
     void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, double time_ms) {
@@ -287,7 +290,7 @@ public:
              << total_nodes << ","
              << (is_multi_node ? "true" : "false") << ","
              << run_id << ","
-             << std::fixed << std::setprecision(3) << time_ms << ",\"" << env_vars << "\"\n";
+             << std::fixed << std::setprecision(3) << time_ms << "\n";
         
         file.close();
         
@@ -295,26 +298,26 @@ public:
         std::cout << "[LOG] " << library_name << " " << collective_name 
                   << " " << data_type << " size=" << message_size_elements 
                   << " rank=" << rank << " hostname=" << hostname << " node=" << node_id
-                  << " run=" << run_id << " time=" << time_ms << "ms env_vars=" << env_vars << " -> " << filename << std::endl;
+                  << " run=" << run_id << " time=" << time_ms << "ms" << " -> " << filename << std::endl;
     }
     
     void log_summary(const std::string& data_type, size_t message_size_elements, int num_ranks, 
                      double min_time_ms, double max_time_ms, double avg_time_ms) {
-        std::cout << "\n=== SUMMARY ===" << std::endl;
-        std::cout << "Library: " << library_name << std::endl;
-        std::cout << "Collective: " << collective_name << std::endl;
-        std::cout << "Data Type: " << data_type << std::endl;
-        std::cout << "Message Size: " << message_size_elements << " elements" << std::endl;
-        std::cout << "Number of Ranks: " << num_ranks << std::endl;
-        std::cout << "Hostname: " << hostname << std::endl;
-        std::cout << "Node ID: " << node_id << std::endl;
-        std::cout << "Total Nodes: " << total_nodes << std::endl;
-        std::cout << "Multi-Node: " << (is_multi_node ? "Yes" : "No") << std::endl;
-        std::cout << "Run ID: " << run_id << std::endl;
-        std::cout << "Env Vars: " << env_vars << std::endl;
-        std::cout << "Min Time: " << std::fixed << std::setprecision(3) << min_time_ms << " ms" << std::endl;
-        std::cout << "Max Time: " << std::fixed << std::setprecision(3) << max_time_ms << " ms" << std::endl;
-        std::cout << "Avg Time: " << std::fixed << std::setprecision(3) << avg_time_ms << " ms" << std::endl;
+         std::cout << "\n=== SUMMARY ===" << std::endl;
+         std::cout << "Library: " << library_name << std::endl;
+         std::cout << "Collective: " << collective_name << std::endl;
+         std::cout << "Data Type: " << data_type << std::endl;
+         std::cout << "Message Size: " << message_size_elements << " elements" << std::endl;
+         std::cout << "Number of Ranks: " << num_ranks << std::endl;
+         std::cout << "Hostname: " << hostname << std::endl;
+         std::cout << "Node ID: " << node_id << std::endl;
+         std::cout << "Total Nodes: " << total_nodes << std::endl;
+         std::cout << "Multi-Node: " << (is_multi_node ? "Yes" : "No") << std::endl;
+         std::cout << "Run ID: " << run_id << std::endl;
+         // std::cout << "Env Vars: " << env_vars << std::endl;
+         std::cout << "Min Time: " << std::fixed << std::setprecision(3) << min_time_ms << " ms" << std::endl;
+         std::cout << "Max Time: " << std::fixed << std::setprecision(3) << max_time_ms << " ms" << std::endl;
+         std::cout << "Avg Time: " << std::fixed << std::setprecision(3) << avg_time_ms << " ms" << std::endl;
         std::cout << "===============\n" << std::endl;
     }
     
@@ -339,6 +342,6 @@ public:
         std::cout << "  --output <path>  : Directory path for logging results (optional)" << std::endl;
         std::cout << "  If --output is not specified, results will only be printed to console" << std::endl;
         std::cout << "\nOutput format: CSV files with columns:" << std::endl;
-        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms, env_vars" << std::endl;
+        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms" << std::endl;
     }
 };
