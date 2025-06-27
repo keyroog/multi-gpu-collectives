@@ -16,9 +16,10 @@ struct NcclContext {
     Logger logger;
 };
 
-inline NcclContext init_nccl(const std::string& output_dir, const std::string& collective_name) {
+inline NcclContext init_nccl(const std::string& output_dir, const std::string& collective_name, 
+                             int argc = 0, char** argv = nullptr) {
     // Initialize MPI
-    MPI_Init(nullptr, nullptr);
+    MPI_Init(&argc, &argv);
     int size, rank;
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -59,7 +60,4 @@ inline void finalize_nccl(NcclContext& ctx) {
     
     // Finalize MPI
     MPI_Finalize();
-    
-    // Log finalization
-    ctx.logger.log("NCCL context finalized for rank " + std::to_string(ctx.rank));
 }

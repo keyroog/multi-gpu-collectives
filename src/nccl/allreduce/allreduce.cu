@@ -84,7 +84,7 @@ int main(int argc, char* argv[]) {
     if (count == 0) count = 10 * 1024 * 1024;
 
     // Initialize NCCL context
-    auto ctx = init_nccl(output_dir, "allreduce");
+    auto ctx = init_nccl(output_dir, "allreduce", argc, argv);  
     int size = ctx.size;
     int rank = ctx.rank;
 
