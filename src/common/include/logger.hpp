@@ -13,6 +13,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 extern char **environ;
 
 class Logger {
@@ -21,14 +22,27 @@ private:
     std::string library_name;
     std::string collective_name;
     int run_id;
-    
+    int mpi_rank;
+
     // Nuove variabili per informazioni sui nodi
     std::string hostname;
     int node_id;
     int total_nodes;
     bool is_multi_node;
-    // std::string env_var_prefix;
-    // std::string env_vars;
+
+    // Redirect NCCL TRACE output to file
+    void redirect_trace_output() {
+        const char* debug_env = std::getenv("NCCL_DEBUG");
+        if (debug_env && std::string(debug_env) == "TRACE") {
+            std::string trace_filename = output_dir + "/" + library_name + "_TRACE_rank" + std::to_string(mpi_rank) + ".log";
+            FILE* trace_file = std::fopen(trace_filename.c_str(), "w");
+            if (trace_file) {
+                int fd = fileno(trace_file);
+                dup2(fd, STDERR_FILENO);
+                setbuf(trace_file, NULL);
+            }
+        }
+    }
 
     std::string get_timestamp() const {
         auto now = std::chrono::system_clock::now();
@@ -211,6 +225,7 @@ public:
         : output_dir(output_dir), library_name(library_name), collective_name(collective_name) {
         ensure_directory_exists();
         initialize_node_info();
+        redirect_trace_output();
         // set default prefix based on library
         if (library_name.find("nccl") != std::string::npos || library_name.find("NCCL") != std::string::npos)
             // env_var_prefix = "NCCL_";
