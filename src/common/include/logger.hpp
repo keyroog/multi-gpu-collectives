@@ -217,7 +217,7 @@ private:
     }
     
     void write_header(std::ofstream& file) const {
-        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms\n";
+        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms,gdr_copy\n";
     }
 
 public:
@@ -245,7 +245,10 @@ public:
         // env_vars = capture_env();
     }
     
-    void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, double time_ms) {
+    void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, double time_ms, bool used_gdr_copy = false) {
+        // Determine if GDR Copy is enabled via NCCL environment variable
+        const char* gdr_env = std::getenv("NCCL_ENABLE_GDRCOPY");
+        used_gdr_copy = (gdr_env && std::string(gdr_env) == "1");
         if (output_dir.empty()) {
             // Se non è specificato un output directory, non loggare su file
             return;
@@ -305,7 +308,8 @@ public:
              << total_nodes << ","
              << (is_multi_node ? "true" : "false") << ","
              << run_id << ","
-             << std::fixed << std::setprecision(3) << time_ms << "\n";
+             << std::fixed << std::setprecision(3) << time_ms << ","
+             << (used_gdr_copy ? "true" : "false") << "\n";
         
         file.close();
         
@@ -357,6 +361,6 @@ public:
         std::cout << "  --output <path>  : Directory path for logging results (optional)" << std::endl;
         std::cout << "  If --output is not specified, results will only be printed to console" << std::endl;
         std::cout << "\nOutput format: CSV files with columns:" << std::endl;
-        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms" << std::endl;
+        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms, gdr_copy" << std::endl;
     }
 };
