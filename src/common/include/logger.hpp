@@ -34,9 +34,11 @@ private:
     void redirect_trace_output() {
         const char* debug_env = std::getenv("NCCL_DEBUG");
         if (debug_env && std::string(debug_env) == "TRACE") {
-            std::string trace_filename = output_dir + "/" + library_name + "_TRACE_rank" + std::to_string(mpi_rank) + ".log";
-            // Let NCCL write its trace output directly to the file
-            setenv("NCCL_LOG_FILE", trace_filename.c_str(), 1);
+            // Build a filename pattern with hostname and PID so NCCL writes to it
+            std::string trace_pattern = output_dir + "/" + library_name + "_TRACE_rank" +
+                std::to_string(mpi_rank) + ".%h.%p.log";
+            // Set NCCL_DEBUG_FILE before any NCCL calls so trace goes to this file
+            setenv("NCCL_DEBUG_FILE", trace_pattern.c_str(), 1);
         }
     }
 
