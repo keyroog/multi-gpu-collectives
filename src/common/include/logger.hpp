@@ -39,6 +39,7 @@ private:
             if (trace_file) {
                 int fd = fileno(trace_file);
                 dup2(fd, STDERR_FILENO);
+                dup2(fd, STDOUT_FILENO);
                 setbuf(trace_file, NULL);
             }
         }
@@ -67,6 +68,7 @@ private:
         // Ottieni informazioni MPI sui nodi
         int rank, size;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        mpi_rank = rank;
         MPI_Comm_size(MPI_COMM_WORLD, &size);
         
         // Raccogli tutti gli hostname dai vari rank
