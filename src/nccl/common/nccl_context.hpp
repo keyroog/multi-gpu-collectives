@@ -5,9 +5,6 @@
 #include <cuda_runtime.h>
 #include <iostream>
 #include <string>
-#include <sys/stat.h>
-#include <chrono>
-#include <ctime>
 #include "../../common/include/logger.hpp"
 
 struct NcclContext {
@@ -22,16 +19,10 @@ struct NcclContext {
 inline NcclContext init_nccl(const std::string& output_dir, const std::string& collective_name, 
                              int argc = 0, char** argv = nullptr) {
     setenv("NCCL_DEBUG", "TRACE", 1);
-    // Create timestamped directory for this run and set NCCL_DEBUG_FILE before MPI_Init
-    auto now = std::chrono::system_clock::now();
-    auto now_c = std::chrono::system_clock::to_time_t(now);
-    char ts[64];
-    std::strftime(ts, sizeof(ts), "%Y%m%d-%H%M%S", std::localtime(&now_c));
-    std::string run_dir = output_dir + "/" + collective_name + "/" + ts;
-    mkdir(run_dir.c_str(), 0755);
-    std::string pattern = run_dir + "/nccl_" + collective_name + "_trace.%h.%p.log";
+    std::string pattern = output_dir + "/"
+        + "nccl_" + collective_name
+        + "_trace.%h.%p.log";
     setenv("NCCL_DEBUG_FILE", pattern.c_str(), 1);
-
     // Initialize MPI
     MPI_Init(&argc, &argv);
     int size, rank;
