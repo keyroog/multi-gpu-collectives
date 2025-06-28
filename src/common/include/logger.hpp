@@ -35,13 +35,8 @@ private:
         const char* debug_env = std::getenv("NCCL_DEBUG");
         if (debug_env && std::string(debug_env) == "TRACE") {
             std::string trace_filename = output_dir + "/" + library_name + "_TRACE_rank" + std::to_string(mpi_rank) + ".log";
-            FILE* trace_file = std::fopen(trace_filename.c_str(), "w");
-            if (trace_file) {
-                int fd = fileno(trace_file);
-                dup2(fd, STDERR_FILENO);
-                dup2(fd, STDOUT_FILENO);
-                setbuf(trace_file, NULL);
-            }
+            // Let NCCL write its trace output directly to the file
+            setenv("NCCL_LOG_FILE", trace_filename.c_str(), 1);
         }
     }
 
