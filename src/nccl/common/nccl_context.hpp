@@ -5,6 +5,9 @@
 #include <cuda_runtime.h>
 #include <iostream>
 #include <string>
+#include <sys/stat.h>
+#include <chrono>
+#include <ctime>
 #include "../../common/include/logger.hpp"
 
 struct NcclContext {
@@ -18,6 +21,17 @@ struct NcclContext {
 
 inline NcclContext init_nccl(const std::string& output_dir, const std::string& collective_name, 
                              int argc = 0, char** argv = nullptr) {
+    setenv("NCCL_DEBUG", "TRACE", 1);
+    // Removed original pattern-based file naming to allow per-run, per-rank directories
+        // Create timestamped run directory for logs
+    auto now = std::chrono::system_clock::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    char ts[64];
+    std::strftime(ts, sizeof(ts), "%Y%m%d-%H%M%S", std::localtime(&now_c));
+    std::string run_dir = output_dir + "/" + collective_name + "/" + ts;
+    mkdir(run_dir.c_str(), 0755);
+    std::string log_file = run_dir + "/rank" + std::to_string(rank) + ".log";
+    setenv("NCCL_DEBUG_FILE", log_file.c_str(), 1);
     // Initialize MPI
     MPI_Init(&argc, &argv);
     int size, rank;

@@ -30,18 +30,6 @@ private:
     int total_nodes;
     bool is_multi_node;
 
-    // Redirect NCCL TRACE output to file
-    void redirect_trace_output() {
-        const char* debug_env = std::getenv("NCCL_DEBUG");
-        if (debug_env && std::string(debug_env) == "TRACE") {
-            // Build a filename pattern with hostname and PID so NCCL writes to it
-            std::string trace_pattern = output_dir + "/" + library_name + "_TRACE_rank" +
-                std::to_string(mpi_rank) + ".%h.%p.log";
-            // Set NCCL_DEBUG_FILE before any NCCL calls so trace goes to this file
-            setenv("NCCL_DEBUG_FILE", trace_pattern.c_str(), 1);
-        }
-    }
-
     std::string get_timestamp() const {
         auto now = std::chrono::system_clock::now();
         auto time_t = std::chrono::system_clock::to_time_t(now);
@@ -224,7 +212,6 @@ public:
         : output_dir(output_dir), library_name(library_name), collective_name(collective_name) {
         ensure_directory_exists();
         initialize_node_info();
-        redirect_trace_output();
         // set default prefix based on library
         if (library_name.find("nccl") != std::string::npos || library_name.find("NCCL") != std::string::npos)
             // env_var_prefix = "NCCL_";
