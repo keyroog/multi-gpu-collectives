@@ -349,4 +349,17 @@ public:
         std::cout << "\nOutput format: CSV files with columns:" << std::endl;
         std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms, gdr_copy" << std::endl;
     }
+
+    void Logger::log_result_with_gdr_detection(const std::string& data_type, 
+                                            size_t message_size_elements, 
+                                            int num_ranks, 
+                                            int rank, 
+                                            double time_ms) {
+        std::string trace_log_file = output_dir + "/nccl_" + collective_name 
+                                    + "_trace." + hostname 
+                                    + "." + std::to_string(getpid()) + ".log";
+
+        bool used_gdr_copy = check_if_gdr_copy_used(trace_log_file);
+        log_result(data_type, message_size_elements, num_ranks, rank, time_ms, used_gdr_copy);
+    }
 };
