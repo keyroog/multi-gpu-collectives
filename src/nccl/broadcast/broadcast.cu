@@ -51,7 +51,7 @@ void run_broadcast(size_t count, int size, int rank, NcclContext& ctx, const std
     double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
 
     // log results
-    ctx.logger.log_result(data_type, count, size, rank, elapsed_ms);
+    ctx.logger.log_result_with_gdr_detection(data_type, count, size, rank, elapsed_ms);
     std::cout << "Rank " << rank << " broadcast time: "
               << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
 
