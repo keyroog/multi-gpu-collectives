@@ -34,8 +34,9 @@ all: dirs $(BINS)
 dirs:
 	@mkdir -p $(BUILD_DIR)
 
-# Regola di compilazione generica
-$(BUILD_DIR)/%: $(SRCDIR)/%/%.${EXT}
+# Regola di compilazione generica (esplicita)
+build/$(LIB)/%: src/$(LIB)/%/$*.${EXT}
+	@mkdir -p $(BUILD_DIR)
 	nvcc -lmpi -lnvidia-ml -l$(LIB) $< -o $@
 
 # Pulizia dei file generati
