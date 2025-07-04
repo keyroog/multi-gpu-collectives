@@ -1,44 +1,51 @@
-# Makefile per compilazione di collettive GPU con supporto variabile di libreria e nome della collettiva
+# Lista collettivi (uguali o diverse per ogni lib se vuoi)
+COLLECTIVES := allgather allreduce alltoall broadcast gather reduce reduce_scatter scatter
 
-# Specificare la libreria (nccl o oneccl)
-LIB ?= nccl
-# Alias: supporto variabile LIBRARY
-ifdef LIBRARY
-override LIB := $(LIBRARY)
-endif
-# Specificare la collettiva da compilare oppure "all"
-COLLECTIVE ?= all
+# ============== NCCL ==============
+NCCL_SRC_DIR := src/nccl
+NCCL_BUILD_DIR := build/nccl
+NCCL_LIBS := -lmpi -lnvidia-ml -lnccl
 
-# Directory sorgenti e destinazione
-SRCDIR := src/$(LIB)
-BUILD_DIR := build/$(LIB)
-EXT := cu
-
-# Selezione dei file sorgente in base a COLLECTIVE
-ifeq ($(COLLECTIVE),all)
-	SRCS := $(wildcard $(SRCDIR)/*/*.${EXT})
+nccl_collective ?= all
+ifeq ($(nccl_collective),all)
+NCCL_TARGETS := $(addprefix $(NCCL_BUILD_DIR)/,$(COLLECTIVES))
 else
-	SRCS := $(SRCDIR)/$(COLLECTIVE)/$(COLLECTIVE).${EXT}
+NCCL_TARGETS := $(addprefix $(NCCL_BUILD_DIR)/,$(nccl_collective))
 endif
 
-# Ricavo dei nomi delle collettive e dei binari
-COLLECTIVES := $(basename $(notdir $(SRCS)))
-BINS := $(addprefix $(BUILD_DIR)/,$(COLLECTIVES))
+# ============== OneCCL ==============
+ONECCL_SRC_DIR := src/oneccl
+ONECCL_BUILD_DIR := build/oneccl
+ONECCL_LIBS := -lmpi -lccl
 
-.PHONY: all clean dirs
+oneccl_collective ?= all
+ifeq ($(oneccl_collective),all)
+ONECCL_TARGETS := $(addprefix $(ONECCL_BUILD_DIR)/,$(COLLECTIVES))
+else
+ONECCL_TARGETS := $(addprefix $(ONECCL_BUILD_DIR)/,$(oneccl_collective))
+endif
 
-# Target di default
-all: dirs $(BINS)
+# ============== Targets principali ==============
+.PHONY: nccl oneccl clean dirs
 
-# Creazione cartella di destinazione
+nccl: dirs $(NCCL_TARGETS)
+oneccl: dirs $(ONECCL_TARGETS)
+
+# ============== Creazione cartelle ==============
 dirs:
-	@mkdir -p $(BUILD_DIR)
+	@mkdir -p $(NCCL_BUILD_DIR)
+	@mkdir -p $(ONECCL_BUILD_DIR)
 
-# Regola di compilazione generica (esplicita)
-build/$(LIB)/%: src/$(LIB)/%/$*.${EXT}
-	@mkdir -p $(BUILD_DIR)
-	nvcc -lmpi -lnvidia-ml -l$(LIB) $< -o $@
+# ============== Regole dinamiche NCCL ==============
+$(foreach c,$(COLLECTIVES),\
+  $(eval $(NCCL_BUILD_DIR)/$(c): $(NCCL_SRC_DIR)/$(c)/$(c).cu ; \
+    nvcc $(NCCL_LIBS) $$< -o $$@))
 
-# Pulizia dei file generati
+# ============== Regole dinamiche OneCCL ==============
+$(foreach c,$(COLLECTIVES),\
+  $(eval $(ONECCL_BUILD_DIR)/$(c): $(ONECCL_SRC_DIR)/$(c)/$(c).cpp ; \
+    icpx -fsycl -O3 $(ONECCL_LIBS) $$< -o $$@))
+
+# ============== Clean ==============
 clean:
 	rm -rf build
