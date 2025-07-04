@@ -2,6 +2,10 @@
 
 # Specificare la libreria (nccl o oneccl)
 LIB ?= nccl
+# Alias: supporto variabile LIBRARY
+ifdef LIBRARY
+override LIB := $(LIBRARY)
+endif
 # Specificare la collettiva da compilare oppure "all"
 COLLECTIVE ?= all
 
@@ -18,7 +22,7 @@ else
 endif
 
 # Ricavo dei nomi delle collettive e dei binari
-COLLECTIVES := $(patsubst $(SRCDIR)/%/%.${EXT},%,$(SRCS))
+COLLECTIVES := $(basename $(notdir $(SRCS)))
 BINS := $(addprefix $(BUILD_DIR)/,$(COLLECTIVES))
 
 .PHONY: all clean dirs
