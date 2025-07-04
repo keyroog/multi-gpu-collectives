@@ -1,36 +1,39 @@
-# --- configurazione di default ---
-LIBRARY    ?= nccl
+# Makefile per compilazione di collettive GPU con supporto variabile di libreria e nome della collettiva
+
+# Specificare la libreria (nccl o oneccl)
+LIB ?= nccl
+# Specificare la collettiva da compilare oppure "all"
 COLLECTIVE ?= all
 
-# directory di build
-BUILD_DIR := build/$(LIBRARY)
+# Directory sorgenti e destinazione
+SRCDIR := src/$(LIB)
+BUILD_DIR := build/$(LIB)
+EXT := cu
 
-# elenco dei sorgenti (.cu) sotto la cartella della library
-SRCS       := $(wildcard $(LIBRARY)/*.cu)
-ALL_COLS   := $(basename $(notdir $(SRCS)))
-
-# se voglio una sola collective, la uso, altrimenti tutte
+# Selezione dei file sorgente in base a COLLECTIVE
 ifeq ($(COLLECTIVE),all)
-  TARGETS := $(ALL_COLS)
+	SRCS := $(wildcard $(SRCDIR)/*/*.${EXT})
 else
-  TARGETS := $(COLLECTIVE)
+	SRCS := $(SRCDIR)/$(COLLECTIVE)/$(COLLECTIVE).${EXT}
 endif
 
-# flags specifiche per library
-NCFLAGS    := -lmpi -lnvidia-ml -lnccl
-ONEFLAGS   := -lmpi -lnvidia-ml -loneccl
-LIB_FLAGS  := $(if $(filter nccl,$(LIBRARY)),$(NCFLAGS),$(ONEFLAGS))
+# Ricavo dei nomi delle collettive e dei binari
+COLLECTIVES := $(patsubst $(SRCDIR)/%/%.${EXT},%,$(SRCS))
+BINS := $(addprefix $(BUILD_DIR)/,$(COLLECTIVES))
 
-.PHONY: all clean
-all: $(BUILD_DIR) $(TARGETS:%=$(BUILD_DIR)/%)
+.PHONY: all clean dirs
 
-# creazione cartella build se non esiste
-$(BUILD_DIR):
-    mkdir -p $@
+# Target di default
+all: dirs $(BINS)
 
-# regola pattern per compilare ciascuna collective
-$(BUILD_DIR)/%: $(LIBRARY)/%.cu
-    nvcc $(LIB_FLAGS) $< -o $@
+# Creazione cartella di destinazione
+dirs:
+	@mkdir -p $(BUILD_DIR)
 
+# Regola di compilazione generica
+$(BUILD_DIR)/%: $(SRCDIR)/%/%.${EXT}
+	nvcc -lmpi -lnvidia-ml -l$(LIB) $< -o $@
+
+# Pulizia dei file generati
 clean:
-    rm -rf build
+	rm -rf build
