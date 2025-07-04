@@ -341,6 +341,21 @@ public:
     int get_run_id() const {
         return run_id;
     }
+
+    bool check_if_gdr_copy_used(const std::string& trace_log_file) const {
+        std::ifstream file(trace_log_file);
+        if (!file.is_open()) {
+            return false;
+        }
+        std::string line;
+        while (std::getline(file, line)) {
+            // Cerca frasi indicative
+            if (line.find("GDRCopy") != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    }
     
     static void print_usage() {
         std::cout << "\nLogger Usage:" << std::endl;
