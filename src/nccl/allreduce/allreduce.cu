@@ -42,6 +42,10 @@ void run_allreduce(size_t count, int size, int rank, NcclContext& ctx, const std
     ncclAllReduce(send_buf, recv_buf, count, nccl_dtype, ncclSum, ctx.comm, ctx.stream);
     cudaStreamSynchronize(ctx.stream);
 
+    // compute expected sum
+    T check_sum = static_cast<T>(0);
+    for (int i = 1; i <= size; ++i) check_sum += static_cast<T>(i);
+
     // perform allreduce and time it 5 times
     for (int iter = 0; iter < 5; ++iter) {
         auto t_start = std::chrono::high_resolution_clock::now();
