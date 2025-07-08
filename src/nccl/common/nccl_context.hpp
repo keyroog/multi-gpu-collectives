@@ -18,11 +18,6 @@ struct NcclContext {
 
 inline NcclContext init_nccl(const std::string& output_dir, const std::string& collective_name, 
                              int argc = 0, char** argv = nullptr) {
-    setenv("NCCL_DEBUG", "TRACE", 1);
-    std::string pattern = output_dir + "/"
-        + "nccl_" + collective_name
-        + "_trace.%h.%p.log";
-    setenv("NCCL_DEBUG_FILE", pattern.c_str(), 1);
     // Initialize MPI
     MPI_Init(&argc, &argv);
     int size, rank;
