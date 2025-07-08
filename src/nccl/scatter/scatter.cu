@@ -44,6 +44,17 @@ void run_scatter(size_t count, int size, int rank, NcclContext& ctx, const std::
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count, size, rank, root);
     cudaStreamSynchronize(ctx.stream);
 
+    // warm-up non misurata
+    ncclGroupStart();
+    if (rank == root) {
+        for (int peer = 0; peer < size; ++peer) {
+            ncclSend(send_buf + peer * count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
+        }
+    }
+    ncclRecv(recv_buf, count, nccl_dtype, root, ctx.comm, ctx.stream);
+    ncclGroupEnd();
+    cudaStreamSynchronize(ctx.stream);
+
     // perform scatter and time it 5 times
     for (int iter = 0; iter < 5; ++iter) {
         auto t_start = std::chrono::high_resolution_clock::now();

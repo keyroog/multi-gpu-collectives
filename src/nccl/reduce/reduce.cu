@@ -47,6 +47,10 @@ void run_reduce(size_t count, int size, int rank, NcclContext& ctx, const std::s
     T check_sum = static_cast<T>(0);
     for (int r = 1; r <= size; ++r) check_sum += static_cast<T>(r);
 
+    // warm-up non misurata
+    ncclReduce(send_buf, recv_buf, count, nccl_dtype, ncclSum, root, ctx.comm, ctx.stream);
+    cudaStreamSynchronize(ctx.stream);
+
     // perform reduce and time it
     auto t_start = std::chrono::high_resolution_clock::now();
     ncclReduce(send_buf, recv_buf, count, nccl_dtype, ncclSum, root, ctx.comm, ctx.stream);

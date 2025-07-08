@@ -42,6 +42,10 @@ void run_allgather(size_t count, int size, int rank, NcclContext& ctx, const std
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count, rank, size);
     cudaStreamSynchronize(ctx.stream);
 
+    // warm-up non misurata
+    ncclAllGather(send_buf, recv_buf, count, nccl_dtype, ctx.comm, ctx.stream);
+    cudaStreamSynchronize(ctx.stream);
+
     // perform allgather and time it 5 times
     for (int iter = 0; iter < 5; ++iter) {
         auto t_start = std::chrono::high_resolution_clock::now();

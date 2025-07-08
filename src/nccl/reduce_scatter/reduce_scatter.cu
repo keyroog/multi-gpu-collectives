@@ -43,6 +43,10 @@ void run_reduce_scatter(size_t count, int size, int rank, NcclContext& ctx, cons
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count, size, rank);
     cudaStreamSynchronize(ctx.stream);
 
+    // warm-up non misurata
+    ncclReduceScatter(send_buf, recv_buf, count, nccl_dtype, ncclSum, ctx.comm, ctx.stream);
+    cudaStreamSynchronize(ctx.stream);
+
     // perform reduce_scatter and time it 5 times
     for (int iter = 0; iter < 5; ++iter) {
         auto t_start = std::chrono::high_resolution_clock::now();

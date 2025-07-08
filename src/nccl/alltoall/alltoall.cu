@@ -41,6 +41,15 @@ void run_alltoall(size_t count, int size, int rank, NcclContext& ctx, const std:
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count, rank, size);
     cudaStreamSynchronize(ctx.stream);
 
+    // warm-up non misurata
+    ncclGroupStart();
+    for (int peer = 0; peer < size; ++peer) {
+        ncclRecv(recv_buf + peer * count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
+        ncclSend(send_buf + peer * count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
+    }
+    ncclGroupEnd();
+    cudaStreamSynchronize(ctx.stream);
+
     // perform alltoall and time it 5 times
     for (int iter = 0; iter < 5; ++iter) {
         auto t_start = std::chrono::high_resolution_clock::now();

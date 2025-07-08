@@ -43,6 +43,10 @@ void run_broadcast(size_t count, int size, int rank, NcclContext& ctx, const std
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count, rank, root);
     cudaStreamSynchronize(ctx.stream);
 
+    // warm-up non misurata
+    ncclBroadcast(send_buf, recv_buf, count, nccl_dtype, root, ctx.comm, ctx.stream);
+    cudaStreamSynchronize(ctx.stream);
+
     // perform broadcast and time it 5 times
     for (int iter = 0; iter < 5; ++iter) {
         auto t_start = std::chrono::high_resolution_clock::now();
