@@ -5,12 +5,9 @@ import argparse
 
 # Mapping dei tipi dati alla loro size in byte
 DTYPES = {
-    'int8':    1,
-    'int32':   4,
-    'float':   4,
-    'float32': 4,
-    'double':  8,
-    'float64': 8,
+    'int':    4,
+    'float':  4,
+    'double': 8,
 }
 
 # Lista di tutte le collettive supportate
@@ -34,12 +31,13 @@ def main():
     )
     parser.add_argument(
         'collective',
-        help="Nome della collettiva o 'all' per tutte"
+        help="Nome della collettiva o 'all' per tutte",
+        choices=COLLECTIVES + ['all']
     )
     parser.add_argument(
         'dtype',
         choices=DTYPES.keys(),
-        help="Tipo di dato (es. float, double, int32)"
+        help="Tipo di dato (int, float, double)"
     )
     parser.add_argument(
         '--sbatch-script',
@@ -48,22 +46,20 @@ def main():
     )
     args = parser.parse_args()
 
-    # Verifica collettiva
+    # Determina le collettive da eseguire
     if args.collective == 'all':
         to_run = COLLECTIVES
     else:
-        if args.collective not in COLLECTIVES:
-            print(f"Errore: collettiva sconosciuta '{args.collective}'")
-            return
         to_run = [args.collective]
 
     # Crea cartella logs se non esiste
-    os.makedirs('/leonardo/home/userexternal/ssirica0/multi-gpu-collectives/logs', exist_ok=True)
+    logs_dir = '/leonardo/home/userexternal/ssirica0/multi-gpu-collectives/logs'
+    os.makedirs(logs_dir, exist_ok=True)
 
     # Genera e invia i job
-    size = DTYPES[args.dtype]
+    elem_size = DTYPES[args.dtype]
     for col in to_run:
-        for cnt in generate_counts(size):
+        for cnt in generate_counts(elem_size):
             job_name = f"nccl_{col}_{args.dtype}_{cnt}"
             cmd = [
                 'sbatch',
