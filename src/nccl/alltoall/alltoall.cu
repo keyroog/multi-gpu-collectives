@@ -41,22 +41,22 @@ void run_alltoall(size_t count, int size, int rank, NcclContext& ctx, const std:
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count, rank, size);
     cudaStreamSynchronize(ctx.stream);
 
-    // perform point-to-point alltoall and time it
-    auto t_start = std::chrono::high_resolution_clock::now();
-    ncclGroupStart();
-    for (int peer = 0; peer < size; ++peer) {
-        ncclRecv(recv_buf + peer * count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
-        ncclSend(send_buf + peer * count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
+    // perform alltoall and time it 5 times
+    for (int iter = 0; iter < 5; ++iter) {
+        auto t_start = std::chrono::high_resolution_clock::now();
+        ncclGroupStart();
+        for (int peer = 0; peer < size; ++peer) {
+            ncclRecv(recv_buf + peer * count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
+            ncclSend(send_buf + peer * count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
+        }
+        ncclGroupEnd();
+        cudaStreamSynchronize(ctx.stream);
+        auto t_end = std::chrono::high_resolution_clock::now();
+        double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
+        ctx.logger.log_result_with_gdr_detection(data_type, count, size, rank, elapsed_ms);
+        std::cout << "Rank " << rank << " alltoall time (iter " << iter << "): "
+                  << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     }
-    ncclGroupEnd();
-    cudaStreamSynchronize(ctx.stream);
-    auto t_end = std::chrono::high_resolution_clock::now();
-    double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
-
-    // log results
-    ctx.logger.log_result_with_gdr_detection(data_type, count, size, rank, elapsed_ms);
-    std::cout << "Rank " << rank << " alltoall time: "
-              << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
 
     // correctness check
     T* host_buf = new T[count * size];

@@ -42,17 +42,17 @@ void run_allreduce(size_t count, int size, int rank, NcclContext& ctx, const std
     T check_sum = static_cast<T>(0);
     for (int i = 1; i <= size; ++i) check_sum += static_cast<T>(i);
 
-    // perform allreduce and time it
-    auto t_start = std::chrono::high_resolution_clock::now();
-    ncclAllReduce(send_buf, recv_buf, count, nccl_dtype, ncclSum, ctx.comm, ctx.stream);
-    cudaStreamSynchronize(ctx.stream);
-    auto t_end = std::chrono::high_resolution_clock::now();
-    double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
-
-    // log results
-    ctx.logger.log_result_with_gdr_detection(data_type, count, size, rank, elapsed_ms);
-    std::cout << "Rank " << rank << " allreduce time: "
-              << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
+    // perform allreduce and time it 5 times
+    for (int iter = 0; iter < 5; ++iter) {
+        auto t_start = std::chrono::high_resolution_clock::now();
+        ncclAllReduce(send_buf, recv_buf, count, nccl_dtype, ncclSum, ctx.comm, ctx.stream);
+        cudaStreamSynchronize(ctx.stream);
+        auto t_end = std::chrono::high_resolution_clock::now();
+        double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
+        ctx.logger.log_result_with_gdr_detection(data_type, count, size, rank, elapsed_ms);
+        std::cout << "Rank " << rank << " allreduce time (iter " << iter << "): "
+                  << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
+    }
 
     // correctness check
     T* host_buf = new T[count];

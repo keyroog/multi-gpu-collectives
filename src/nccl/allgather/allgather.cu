@@ -42,17 +42,17 @@ void run_allgather(size_t count, int size, int rank, NcclContext& ctx, const std
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count, rank, size);
     cudaStreamSynchronize(ctx.stream);
 
-    // perform allgather and time it
-    auto t_start = std::chrono::high_resolution_clock::now();
-    ncclAllGather(send_buf, recv_buf, count, nccl_dtype, ctx.comm, ctx.stream);
-    cudaStreamSynchronize(ctx.stream);
-    auto t_end = std::chrono::high_resolution_clock::now();
-    double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
-
-    // log results
-    ctx.logger.log_result_with_gdr_detection(data_type, count, size, rank, elapsed_ms);
-    std::cout << "Rank " << rank << " allgather time: "
-              << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
+    // perform allgather and time it 5 times
+    for (int iter = 0; iter < 5; ++iter) {
+        auto t_start = std::chrono::high_resolution_clock::now();
+        ncclAllGather(send_buf, recv_buf, count, nccl_dtype, ctx.comm, ctx.stream);
+        cudaStreamSynchronize(ctx.stream);
+        auto t_end = std::chrono::high_resolution_clock::now();
+        double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
+        ctx.logger.log_result_with_gdr_detection(data_type, count, size, rank, elapsed_ms);
+        std::cout << "Rank " << rank << " allgather time (iter " << iter << "): "
+                  << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
+    }
 
     // correctness check
     T* host_buf = new T[count * size];
