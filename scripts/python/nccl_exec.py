@@ -26,7 +26,7 @@ def generate_counts(elem_size):
     cnt = 1
     while cnt * elem_size <= max_bytes:
         yield cnt
-        cnt *= 2
+        cnt *= 4
 
 def main():
     parser = argparse.ArgumentParser(
