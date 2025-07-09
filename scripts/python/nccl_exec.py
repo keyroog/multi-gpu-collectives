@@ -17,22 +17,24 @@ COLLECTIVES = [
     'reduce_scatter','scatter'
 ]
 
-def generate_counts(elem_size):
-    """Genera potenze di 2 finché size <= 1 GiB."""
-    max_bytes = 1 << 30  # 1 GiB
-    cnt = 1
-    while cnt * elem_size <= max_bytes:
-        yield cnt
-        cnt *= 4
+# Dimensioni fisse dei messaggi: (bytes, label)
+MESSAGE_SIZES = [
+    (64,           '64b'),
+    (4 * 1024,     '4Kib'),
+    (256 * 1024,   '256Kib'),
+    (16 * 1024**2, '16Mib'),
+    (256 * 1024**2,'256Mib'),
+    (1 * 1024**3,  '1Gib'),
+]
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sottomette job SBATCH per test NCCL."
+        description="Sottomette job SBATCH per test NCCL con message size fisse."
     )
     parser.add_argument(
         'collective',
-        help="Nome della collettiva o 'all' per tutte",
-        choices=COLLECTIVES + ['all']
+        choices=COLLECTIVES + ['all'],
+        help="Nome della collettiva o 'all' per tutte"
     )
     parser.add_argument(
         'dtype',
@@ -47,20 +49,18 @@ def main():
     args = parser.parse_args()
 
     # Determina le collettive da eseguire
-    if args.collective == 'all':
-        to_run = COLLECTIVES
-    else:
-        to_run = [args.collective]
+    to_run = COLLECTIVES if args.collective == 'all' else [args.collective]
 
     # Crea cartella logs se non esiste
     logs_dir = '/leonardo/home/userexternal/ssirica0/multi-gpu-collectives/logs'
     os.makedirs(logs_dir, exist_ok=True)
 
-    # Genera e invia i job
     elem_size = DTYPES[args.dtype]
     for col in to_run:
-        for cnt in generate_counts(elem_size):
-            job_name = f"nccl_{col}_{args.dtype}_{cnt}"
+        for msg_bytes, label in MESSAGE_SIZES:
+            cnt = msg_bytes // elem_size
+            # Job name con etichetta umana esatta
+            job_name = f"nccl_{col}_{args.dtype}_{label}"
             cmd = [
                 'sbatch',
                 '--job-name', job_name,
