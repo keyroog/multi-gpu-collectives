@@ -291,7 +291,7 @@ public:
              << total_nodes << ","
              << (is_multi_node ? "true" : "false") << ","
              << run_id << ","
-             << std::fixed << std::setprecision(3) << time_ms << ","
+             << std::fixed << std::setprecision(3) << time_ms << "\n";
         
         file.close();
         

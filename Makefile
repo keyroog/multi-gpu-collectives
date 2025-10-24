@@ -1,11 +1,11 @@
 # Lista collettivi (uguali o diverse per ogni lib se vuoi)
 COLLECTIVES := allgather allreduce alltoall broadcast gather reduce reduce_scatter scatter
+COMMON_INC := -Isrc/common/include
 
 # ============== NCCL ==============
 NCCL_SRC_DIR := src/nccl
 NCCL_BUILD_DIR := build/nccl
-NCCL_LIBS := -lmpi -lnvidia-ml -lnccl
-
+NCCL_LIBS := -lmpi -lnvidia-ml -lnccl $(COMMON_INC)
 nccl_collective ?= all
 ifeq ($(nccl_collective),all)
 NCCL_TARGETS := $(addprefix $(NCCL_BUILD_DIR)/,$(COLLECTIVES))
@@ -14,9 +14,9 @@ NCCL_TARGETS := $(addprefix $(NCCL_BUILD_DIR)/,$(nccl_collective))
 endif
 
 # ============== OneCCL ==============
-ONECCL_SRC_DIR := src/oneccl/coll
+ONECCL_SRC_DIR := src/oneccl
 ONECCL_BUILD_DIR := build/oneccl
-ONECCL_LIBS := -lmpi -lccl
+ONECCL_LIBS := -lmpi -lccl $(COMMON_INC)
 
 oneccl_collective ?= all
 ifeq ($(oneccl_collective),all)
