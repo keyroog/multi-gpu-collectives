@@ -99,6 +99,13 @@ int main(int argc, char** argv) {
         double rtt_gbps = (2.0 * msg_bytes) / (avg_ms * 1e6);
         std::printf("[TWO GPUs] msg=%zu B iters=%d  avg RTT=%.3f ms  throughput≈%.3f GB/s\n",
                     msg_bytes, iters, avg_ms, rtt_gbps);
+        //SCRIVI SU FILE
+        std::ofstream outfile("pingpong_two_gpus.txt", std::ios::app);
+        if (outfile.is_open()) {
+            outfile << "[TWO GPUs] msg=" << msg_bytes << " B iters=" << iters
+                    << "  avg RTT=" << avg_ms << " ms  throughput≈" << rtt_gbps << " GB/s\n";
+            outfile.close();
+        }
     }
 
     sycl::free(buf, q);

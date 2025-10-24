@@ -33,12 +33,17 @@ inline OneCCLContext init_oneccl(const std::string& output_dir, const std::strin
 
     // Select Level-Zero GPU devices
     std::vector<sycl::device> devices;
-    auto platforms = sycl::platform::get_platforms();
-    for (const auto& platform : platforms) {
-        auto pname = platform.get_info<sycl::info::platform::name>();
-        if (pname.find("Level-Zero") != std::string::npos) {
-            for (const auto& device : platform.get_devices()) {
-                if (device.is_gpu()) devices.push_back(device);
+    auto platform_list = sycl::platform::get_platforms();
+    for (const auto &platform : platform_list) {
+        auto platform_name = platform.get_info<sycl::info::platform::name>();
+        bool is_level_zero = platform_name.find("Level-Zero") != std::string::npos;
+        if (is_level_zero) {
+            std::cout << "Platform_name is:  " << platform_name << std::endl;
+            auto device_list = platform.get_devices();
+            for (const auto &device : device_list) {
+                if (device.is_gpu()) {
+                    devices.push_back(device);
+                }
             }
         }
     }

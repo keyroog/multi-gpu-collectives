@@ -204,7 +204,7 @@ private:
     }
     
     void write_header(std::ofstream& file) const {
-        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms,gdr_copy\n";
+        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms\n";
     }
 
 public:
@@ -231,10 +231,7 @@ public:
         // env_vars = capture_env();
     }
     
-    void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, double time_ms, bool used_gdr_copy = false) {
-        // Determine if GDR Copy is enabled via NCCL environment variable
-        const char* gdr_env = std::getenv("NCCL_ENABLE_GDRCOPY");
-        used_gdr_copy = (gdr_env && std::string(gdr_env) == "1");
+    void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, double time_ms) {
         if (output_dir.empty()) {
             // Se non è specificato un output directory, non loggare su file
             return;
@@ -295,7 +292,6 @@ public:
              << (is_multi_node ? "true" : "false") << ","
              << run_id << ","
              << std::fixed << std::setprecision(3) << time_ms << ","
-             << (used_gdr_copy ? "true" : "false") << "\n";
         
         file.close();
         
@@ -304,26 +300,6 @@ public:
                   << " " << data_type << " size=" << message_size_elements 
                   << " rank=" << rank << " hostname=" << hostname << " node=" << node_id
                   << " run=" << run_id << " time=" << time_ms << "ms" << " -> " << filename << std::endl;
-    }
-    
-    void log_summary(const std::string& data_type, size_t message_size_elements, int num_ranks, 
-                     double min_time_ms, double max_time_ms, double avg_time_ms) {
-         std::cout << "\n=== SUMMARY ===" << std::endl;
-         std::cout << "Library: " << library_name << std::endl;
-         std::cout << "Collective: " << collective_name << std::endl;
-         std::cout << "Data Type: " << data_type << std::endl;
-         std::cout << "Message Size: " << message_size_elements << " elements" << std::endl;
-         std::cout << "Number of Ranks: " << num_ranks << std::endl;
-         std::cout << "Hostname: " << hostname << std::endl;
-         std::cout << "Node ID: " << node_id << std::endl;
-         std::cout << "Total Nodes: " << total_nodes << std::endl;
-         std::cout << "Multi-Node: " << (is_multi_node ? "Yes" : "No") << std::endl;
-         std::cout << "Run ID: " << run_id << std::endl;
-         // std::cout << "Env Vars: " << env_vars << std::endl;
-         std::cout << "Min Time: " << std::fixed << std::setprecision(3) << min_time_ms << " ms" << std::endl;
-         std::cout << "Max Time: " << std::fixed << std::setprecision(3) << max_time_ms << " ms" << std::endl;
-         std::cout << "Avg Time: " << std::fixed << std::setprecision(3) << avg_time_ms << " ms" << std::endl;
-        std::cout << "===============\n" << std::endl;
     }
     
     // Metodo per impostare manualmente il run_id (opzionale)
@@ -341,40 +317,12 @@ public:
     int get_run_id() const {
         return run_id;
     }
-
-    bool check_if_gdr_copy_used(const std::string& trace_log_file) const {
-        std::ifstream file(trace_log_file);
-        if (!file.is_open()) {
-            return false;
-        }
-        std::string line;
-        while (std::getline(file, line)) {
-            // Cerca frasi indicative
-            if (line.find("GDRCopy") != std::string::npos) {
-                return true;
-            }
-        }
-        return false;
-    }
     
     static void print_usage() {
         std::cout << "\nLogger Usage:" << std::endl;
         std::cout << "  --output <path>  : Directory path for logging results (optional)" << std::endl;
         std::cout << "  If --output is not specified, results will only be printed to console" << std::endl;
         std::cout << "\nOutput format: CSV files with columns:" << std::endl;
-        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms, gdr_copy" << std::endl;
-    }
-
-    void log_result_with_gdr_detection(const std::string& data_type, 
-                                            size_t message_size_elements, 
-                                            int num_ranks, 
-                                            int rank, 
-                                            double time_ms) {
-        std::string trace_log_file = output_dir + "/nccl_" + collective_name 
-                                    + "_trace." + hostname 
-                                    + "." + std::to_string(getpid()) + ".log";
-
-        bool used_gdr_copy = check_if_gdr_copy_used(trace_log_file);
-        log_result(data_type, message_size_elements, num_ranks, rank, time_ms, used_gdr_copy);
+        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms" << std::endl;
     }
 };
