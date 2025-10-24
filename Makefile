@@ -14,7 +14,7 @@ NCCL_TARGETS := $(addprefix $(NCCL_BUILD_DIR)/,$(nccl_collective))
 endif
 
 # ============== OneCCL ==============
-ONECCL_SRC_DIR := src/oneccl
+ONECCL_SRC_DIR := src/oneccl/coll
 ONECCL_BUILD_DIR := build/oneccl
 ONECCL_LIBS := -lmpi -lccl
 
