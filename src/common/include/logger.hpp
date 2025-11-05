@@ -205,7 +205,7 @@ private:
     }
     
     void write_header(std::ofstream& file) const {
-        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,time_ms\n";
+        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,gpu_mode,time_ms\n";
     }
 
 public:
