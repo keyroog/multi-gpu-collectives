@@ -32,4 +32,5 @@
 *.err
 *.app
 
-/logs/nccl/logs2
+/logs
+/plots
