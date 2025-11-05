@@ -75,8 +75,15 @@ int main(int argc, char* argv[]) {
         count = 10 * 1024 * 1024; // Default value if not provided
     }
 
+    std::string gpu_mode;
+    try{
+        gpu_mode = parser.get<std::string>("--gpu_mode");
+    } catch (const std::runtime_error&) {
+        gpu_mode = "gpu"; // default mode
+    }
+
     // Initialize OneCCL context (MPI, CCL, devices, communicator, logger)
-    auto ctx = init_oneccl(output_dir, "allreduce");
+    auto ctx = init_oneccl(output_dir, "allreduce", gpu_mode);
     int size = ctx.size;
     int rank = ctx.rank;
     auto& q = ctx.q;

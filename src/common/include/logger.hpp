@@ -21,6 +21,7 @@ private:
     std::string output_dir;
     std::string library_name;
     std::string collective_name;
+    std::string gpu_mode = "gpu";
     int run_id;
     int mpi_rank;
 
@@ -208,8 +209,8 @@ private:
     }
 
 public:
-    Logger(const std::string& output_dir, const std::string& library_name, const std::string& collective_name)
-        : output_dir(output_dir), library_name(library_name), collective_name(collective_name) {
+    Logger(const std::string& output_dir, const std::string& library_name, const std::string& collective_name, const std::string& gpu_mode = "gpu")
+        : output_dir(output_dir), library_name(library_name), collective_name(collective_name), gpu_mode(gpu_mode) {
         ensure_directory_exists();
         initialize_node_info();
         // set default prefix based on library
@@ -291,6 +292,7 @@ public:
              << total_nodes << ","
              << (is_multi_node ? "true" : "false") << ","
              << run_id << ","
+             << gpu_mode << ","
              << std::fixed << std::setprecision(3) << time_ms << "\n";
         
         file.close();
@@ -299,7 +301,7 @@ public:
         std::cout << "[LOG] " << library_name << " " << collective_name 
                   << " " << data_type << " size=" << message_size_elements 
                   << " rank=" << rank << " hostname=" << hostname << " node=" << node_id
-                  << " run=" << run_id << " time=" << time_ms << "ms" << " -> " << filename << std::endl;
+                  << " run=" << run_id << " gpu_mode=" << gpu_mode << " time=" << time_ms << "ms" << " -> " << filename << std::endl;
     }
     
     // Metodo per impostare manualmente il run_id (opzionale)
@@ -323,6 +325,6 @@ public:
         std::cout << "  --output <path>  : Directory path for logging results (optional)" << std::endl;
         std::cout << "  If --output is not specified, results will only be printed to console" << std::endl;
         std::cout << "\nOutput format: CSV files with columns:" << std::endl;
-        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, time_ms" << std::endl;
+        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, gpu_mode, time_ms" << std::endl;
     }
 };
