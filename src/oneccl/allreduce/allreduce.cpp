@@ -61,7 +61,8 @@ int main(int argc, char* argv[]) {
     parser.parse();
 
     std::string dtype = parser.get<std::string>("--dtype");
-    size_t count = parser.get<size_t>("--count");
+    // Ora interpretiamo count come NUMERO TOTALE DI ELEMENTI GLOBALI
+    size_t global_count = parser.get<size_t>("--count");
 
     std::string output_dir;
     try {
@@ -69,10 +70,10 @@ int main(int argc, char* argv[]) {
     } catch (const std::runtime_error&) {
         output_dir = ""; // logging disabled if not provided
     }
-    
-    //default value for count
-    if (count == 0) {
-        count = 10 * 1024 * 1024; // Default value if not provided
+
+    // default value per global_count se non specificato o 0
+    if (global_count == 0) {
+        global_count = 10 * 1024 * 1024; // totale globale di elementi
     }
 
     std::string gpu_mode;
@@ -84,23 +85,44 @@ int main(int argc, char* argv[]) {
 
     // Initialize OneCCL context (MPI, CCL, devices, communicator, logger)
     auto ctx = init_oneccl(output_dir, "allreduce", gpu_mode);
-    int size = ctx.size;
+    int size = ctx.size;  // numero di rank MPI
     int rank = ctx.rank;
-    auto& q = ctx.q;
-    auto& comm = ctx.comm;
+    auto& q      = ctx.q;
+    auto& comm   = ctx.comm;
     auto& stream = ctx.stream;
     auto& logger = ctx.logger;
-     
-    // dispatch based on dtype
-    if (dtype == "int") {
-        run_allreduce<int>(count, size, rank, comm, q, stream, logger, dtype);
-    } else if (dtype == "float") {
-        run_allreduce<float>(count, size, rank, comm, q, stream, logger, dtype);
-    } else if (dtype == "double") {
-        run_allreduce<double>(count, size, rank, comm, q, stream, logger, dtype);
-    } else {
-        std::cerr << "Unsupported dtype: " << dtype << std::endl;
-        exit(-1);
+
+    // calcoliamo gli ELEMENTI PER RANK a partire dal totale globale
+    size_t local_count = global_count / size;
+    size_t remainder   = global_count % size;
+
+    if (local_count == 0) {
+        if (rank == 0) {
+            std::cerr << "Global count too small for size=" << size << std::endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
+
+    if (rank == 0 && remainder != 0) {
+        std::cerr << "Warning: global_count (" << global_count
+                  << ") is not divisible by size (" << size
+                  << "). Using local_count=" << local_count
+                  << " and ignoring last " << remainder << " elements.\n";
+    }
+
+    // dispatch based on dtype, usando local_count
+    if (dtype == "int") {
+        run_allreduce<int>(local_count, size, rank, comm, q, stream, logger, dtype);
+    } else if (dtype == "float") {
+        run_allreduce<float>(local_count, size, rank, comm, q, stream, logger, dtype);
+    } else if (dtype == "double") {
+        run_allreduce<double>(local_count, size, rank, comm, q, stream, logger, dtype);
+    } else {
+        if (rank == 0) {
+            std::cerr << "Unsupported dtype: " << dtype << std::endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
     return 0;
 }
