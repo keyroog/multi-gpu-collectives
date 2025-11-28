@@ -9,35 +9,21 @@
 #include <vector>
 #include <numeric>
 
-// Template wrapper for different data types
 template <typename T>
-void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
-                   Logger& logger, const std::string& data_type) {
-    
-    // Each rank sends different amounts to different destinations
-    // Pattern: rank r sends (base_count + r*100 + dest*50) elements to rank dest
-    std::vector<size_t> send_counts(size);
-    std::vector<size_t> send_displs(size);
-    std::vector<size_t> recv_counts(size);
-    std::vector<size_t> recv_displs(size);
-    
-    // Calculate send counts and displacements
-    size_t total_send = 0;
-    for (int dest = 0; dest < size; ++dest) {
-        send_counts[dest] = base_count + rank * 100 + dest * 50;
-        send_displs[dest] = total_send;
-        total_send += send_counts[dest];
-    }
-    
-    // Calculate receive counts and displacements
-    // We need to know what each source rank will send to us
-    size_t total_recv = 0;
-    for (int src = 0; src < size; ++src) {
-        recv_counts[src] = base_count + src * 100 + rank * 50;
-        recv_displs[src] = total_recv;
-        total_recv += recv_counts[src];
-    }
-    
+void run_alltoallv(const std::vector<size_t>& send_counts,
+                   const std::vector<size_t>& recv_counts,
+                   const std::vector<size_t>& recv_displs,
+                   size_t global_count,
+                   int size,
+                   int rank,
+                   ccl::communicator& comm,
+                   sycl::queue& q,
+                   ccl::stream stream,
+                   Logger& logger,
+                   const std::string& data_type) {
+    size_t total_send = std::accumulate(send_counts.begin(), send_counts.end(), 0UL);
+    size_t total_recv = std::accumulate(recv_counts.begin(), recv_counts.end(), 0UL);
+
     // allocate device buffers
     auto send_buf = sycl::malloc_device<T>(total_send, q);
     auto recv_buf = sycl::malloc_device<T>(total_recv, q);
@@ -89,7 +75,7 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
     // Log dei risultati - use total elements for meaningful comparison
-    logger.log_result(data_type, total_recv, size, rank, elapsed_ms);
+    logger.log_result(data_type, global_count, size, rank, elapsed_ms);
     
     std::cout << "Rank " << rank << " alltoallv time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms "
               << "(sent: " << total_send << ", received: " << total_recv << " elements)\n";
@@ -136,35 +122,17 @@ void run_alltoallv(size_t base_count, int size, int rank, ccl::communicator& com
         }
     }
     
-    // Print detailed communication matrix (only from rank 0 to avoid spam)
+    // Print simple summary (only from rank 0 to avoid spam)
     if (rank == 0) {
-        std::cout << "\nCommunication Matrix (elements sent from rank i to rank j):\n";
-        std::cout << "     ";
+        std::cout << "\nRank 0 send counts per destination:\n  ";
         for (int j = 0; j < size; ++j) {
-            std::cout << std::setw(8) << ("To_" + std::to_string(j));
+            std::cout << send_counts[j] << (j + 1 == size ? "" : ", ");
+        }
+        std::cout << "\nRank 0 receive counts per source:\n  ";
+        for (int s = 0; s < size; ++s) {
+            std::cout << recv_counts[s] << (s + 1 == size ? "" : ", ");
         }
         std::cout << "\n";
-        
-        for (int i = 0; i < size; ++i) {
-            std::cout << "From_" << i << ":";
-            for (int j = 0; j < size; ++j) {
-                size_t elements = base_count + i * 100 + j * 50;
-                std::cout << std::setw(8) << elements;
-            }
-            std::cout << "\n";
-        }
-        
-        std::cout << "\nTotal elements per rank:\n";
-        for (int r = 0; r < size; ++r) {
-            size_t rank_total_send = 0;
-            size_t rank_total_recv = 0;
-            for (int other = 0; other < size; ++other) {
-                rank_total_send += base_count + r * 100 + other * 50;  // what rank r sends
-                rank_total_recv += base_count + other * 100 + r * 50;  // what rank r receives
-            }
-            std::cout << "  Rank " << r << ": sends " << rank_total_send 
-                      << ", receives " << rank_total_recv << " elements\n";
-        }
     }
     
     // Free device memory for counts and displacements
@@ -182,7 +150,7 @@ int main(int argc, char* argv[]) {
     parser.parse();
 
     std::string dtype = parser.get<std::string>("--dtype");
-    size_t base_count = parser.get<size_t>("--count");
+    size_t global_count = parser.get<size_t>("--count");
 
     std::string output_dir;
     try {
@@ -191,9 +159,9 @@ int main(int argc, char* argv[]) {
         output_dir = "";
     }
     
-    // default value for base_count (smaller due to O(n²) scaling with variable sizes)
-    if (base_count == 0) {
-        base_count = 10000; // 10K base elements, much smaller due to complexity
+    // default value for global_count (still keep it small due to O(n²) scaling)
+    if (global_count == 0) {
+        global_count = 10000; // totale globale di elementi scambiati
     }
 
     // Initialize OneCCL context (MPI, CCL, devices, communicator, logger)
@@ -205,23 +173,63 @@ int main(int argc, char* argv[]) {
     auto& stream = ctx.stream;
     auto& logger = ctx.logger;
     
+    size_t per_rank_base = global_count / size;
+    size_t per_rank_remainder = global_count % size;
+
+    if (per_rank_base == 0) {
+        if (rank == 0) {
+            std::cerr << "Global count too small for size=" << size << std::endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
+    size_t rank_total = per_rank_base + (static_cast<size_t>(rank) < per_rank_remainder ? 1 : 0);
+    std::vector<size_t> send_counts(size);
+    for (int dest = 0; dest < size; ++dest) {
+        size_t send_base = rank_total / size;
+        size_t send_remainder = rank_total % size;
+        // spread the remainder across destinations based on sender rank
+        size_t extra = ((dest + rank) % size) < send_remainder ? 1 : 0;
+        send_counts[dest] = send_base + extra;
+    }
+
+    std::vector<size_t> recv_counts(size);
+    std::vector<size_t> recv_displs(size);
+    for (int src = 0; src < size; ++src) {
+        size_t src_total = per_rank_base + (static_cast<size_t>(src) < per_rank_remainder ? 1 : 0);
+        size_t src_base = src_total / size;
+        size_t src_rem = src_total % size;
+        size_t extra = ((rank + src) % size) < src_rem ? 1 : 0;
+        size_t from_src = src_base + extra;
+        recv_counts[src] = from_src;
+        recv_displs[src] = (src == 0 ? 0 : recv_displs[src - 1] + recv_counts[src - 1]);
+    }
+
+    size_t effective_global_count = per_rank_base * size + per_rank_remainder;
+    if (rank == 0 && per_rank_remainder != 0) {
+        std::cerr << "Warning: global_count (" << global_count
+                  << ") not divisible by size (" << size
+                  << "). Distributing remainder across ranks, effective_total="
+                  << effective_global_count << ".\n";
+    }
+
     if (rank == 0) {
         std::cout << "AllToAllV with " << size << " processes\n";
-        std::cout << "Base count: " << base_count << " elements\n";
-        std::cout << "Each rank sends (base + sender*100 + dest*50) elements to each destination\n";
+        std::cout << "Global elements: " << effective_global_count
+                  << " (~" << rank_total << " per rank, distributed across peers)\n";
         std::cout << "Warning: This is the most memory-intensive collective operation!\n";
     }
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_alltoallv<int>(base_count, size, rank, comm, q, stream, logger, dtype);
+        run_alltoallv<int>(send_counts, recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "float") {
-        run_alltoallv<float>(base_count, size, rank, comm, q, stream, logger, dtype);
+        run_alltoallv<float>(send_counts, recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "double") {
-        run_alltoallv<double>(base_count, size, rank, comm, q, stream, logger, dtype);
+        run_alltoallv<double>(send_counts, recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
-        exit(-1);
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
     
     return 0;

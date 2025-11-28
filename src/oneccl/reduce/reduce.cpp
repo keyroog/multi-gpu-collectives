@@ -6,17 +6,16 @@
 #include <string>
 #include <iomanip>
 
-// Template wrapper for different data types
 template <typename T>
-void run_reduce(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
+void run_reduce(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
                 Logger& logger, const std::string& data_type, int root_rank) {
     // allocate device buffers
-    auto send_buf = sycl::malloc_device<T>(count, q);
-    auto recv_buf = sycl::malloc_device<T>(count, q);
+    auto send_buf = sycl::malloc_device<T>(local_count, q);
+    auto recv_buf = sycl::malloc_device<T>(local_count, q);
     
     // initialize send buffer - each rank contributes different data
     auto e = q.submit([&](auto& h) {
-        h.parallel_for(count, [=](auto id) {
+        h.parallel_for(local_count, [=](auto id) {
             // Each rank contributes (rank + 1) * (id + 1) to make verification easier
             send_buf[id] = static_cast<T>((rank + 1) * (id + 1));
             // Initialize recv buffer
@@ -36,13 +35,13 @@ void run_reduce(size_t count, int size, int rank, ccl::communicator& comm, sycl:
     auto attr = ccl::create_operation_attr<ccl::reduce_attr>();
     
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::reduce(send_buf, recv_buf, count, ccl::reduction::sum, root_rank, comm, stream, attr, deps).wait();
+    ccl::reduce(send_buf, recv_buf, local_count, ccl::reduction::sum, root_rank, comm, stream, attr, deps).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
     // Log dei risultati
-    logger.log_result(data_type, count, size, rank, elapsed_ms);
+    logger.log_result(data_type, global_count, size, rank, elapsed_ms);
     
     std::cout << "Rank " << rank << " reduce time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     
@@ -53,7 +52,7 @@ void run_reduce(size_t count, int size, int rank, ccl::communicator& comm, sycl:
             sycl::accessor acc(check_buf, h, sycl::write_only);
             h.single_task([=]() {
                 bool passed = true;
-                for (size_t i = 0; i < count && passed; ++i) {
+                for (size_t i = 0; i < local_count && passed; ++i) {
                     // Expected: sum of (r+1)*(i+1) for r from 0 to size-1
                     // = (i+1) * sum(r+1) = (i+1) * check_factor
                     T expected = static_cast<T>((i + 1)) * check_factor;
@@ -90,7 +89,7 @@ int main(int argc, char* argv[]) {
     parser.parse();
 
     std::string dtype = parser.get<std::string>("--dtype");
-    size_t count = parser.get<size_t>("--count");
+    size_t global_count = parser.get<size_t>("--count");
 
     std::string output_dir;
     try {
@@ -109,8 +108,8 @@ int main(int argc, char* argv[]) {
     }
     
     // default values
-    if (count == 0) {
-        count = 10 * 1024 * 1024; // Default value if not provided
+    if (global_count == 0) {
+        global_count = 10 * 1024 * 1024; // totale globale di elementi
     }
     
     // Initialize OneCCL context (MPI, CCL, devices, communicator, logger)
@@ -121,29 +120,48 @@ int main(int argc, char* argv[]) {
     auto& comm = ctx.comm;
     auto& stream = ctx.stream;
     auto& logger = ctx.logger;
+
+    size_t local_count = global_count / size;
+    size_t remainder   = global_count % size;
+    size_t effective_global_count = local_count * size;
+
+    if (local_count == 0) {
+        if (rank == 0) {
+            std::cerr << "Global count too small for size=" << size << std::endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
+    if (rank == 0 && remainder != 0) {
+        std::cerr << "Warning: global_count (" << global_count
+                  << ") is not divisible by size (" << size
+                  << "). Using local_count=" << local_count
+                  << " and ignoring last " << remainder << " elements.\n";
+    }
     
     // Validate root rank
     if (root_rank < 0 || root_rank >= size) {
         if (rank == 0) {
             std::cerr << "Invalid root rank " << root_rank << ". Must be between 0 and " << (size-1) << std::endl;
         }
-        exit(-1);
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
     
     if (rank == 0) {
         std::cout << "Reducing to rank " << root_rank << " from " << size << " processes\n";
+        std::cout << "Global elements: " << effective_global_count << " (" << local_count << " per rank)\n";
     }
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_reduce<int>(count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_reduce<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
     } else if (dtype == "float") {
-        run_reduce<float>(count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_reduce<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
     } else if (dtype == "double") {
-        run_reduce<double>(count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_reduce<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
-        exit(-1);
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
     
     return 0;

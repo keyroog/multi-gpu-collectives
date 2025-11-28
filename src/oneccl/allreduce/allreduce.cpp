@@ -5,16 +5,15 @@
 #include "../../common/include/logger.hpp"
 #include <string>
 
-// Template wrapper for different data types
 template <typename T>
-void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
+void run_allreduce(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
                   Logger& logger, const std::string& data_type) {
     // allocate device buffers
-    auto send_buf = sycl::malloc_device<T>(count, q);
-    auto recv_buf = sycl::malloc_device<T>(count, q);
+    auto send_buf = sycl::malloc_device<T>(local_count, q);
+    auto recv_buf = sycl::malloc_device<T>(local_count, q);
     // initialize buffers
     auto e = q.submit([&](auto& h) {
-        h.parallel_for(count, [=](auto id) {
+        h.parallel_for(local_count, [=](auto id) {
             send_buf[id] = static_cast<T>(rank + id + 1);
             recv_buf[id] = static_cast<T>(-1);
         });
@@ -27,19 +26,19 @@ void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sy
     deps.push_back(ccl::create_event(e));
     auto attr = ccl::create_operation_attr<ccl::allreduce_attr>();
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::allreduce(send_buf, recv_buf, count, ccl::reduction::sum, comm, stream, attr, deps).wait();
+    ccl::allreduce(send_buf, recv_buf, local_count, ccl::reduction::sum, comm, stream, attr, deps).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
     // Log dei risultati
-    logger.log_result(data_type, count, size, rank, elapsed_ms);
+    logger.log_result(data_type, global_count, size, rank, elapsed_ms);
     
     std::cout << "Rank " << rank << " allreduce time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     // correctness check
-    sycl::buffer<T> check_buf(count);
+    sycl::buffer<T> check_buf(local_count);
     q.submit([&](auto& h) {
         sycl::accessor acc(check_buf, h, sycl::write_only);
-        h.parallel_for(count, [=](auto id) {
+        h.parallel_for(local_count, [=](auto id) {
             if (recv_buf[id] != static_cast<T>(check_sum + size * id)) acc[id] = static_cast<T>(-1);
         });
     });
@@ -48,8 +47,8 @@ void run_allreduce(size_t count, int size, int rank, ccl::communicator& comm, sy
     {
         sycl::host_accessor acc(check_buf, sycl::read_only);
         size_t i = 0;
-        for (; i < count; ++i) if (acc[i] == static_cast<T>(-1)) { std::cout << "FAILED\n"; break; }
-        if (i == count) std::cout << "PASSED\n";
+        for (; i < local_count; ++i) if (acc[i] == static_cast<T>(-1)) { std::cout << "FAILED\n"; break; }
+        if (i == local_count) std::cout << "PASSED\n";
     }
     sycl::free(send_buf, q);
     sycl::free(recv_buf, q);
@@ -95,6 +94,7 @@ int main(int argc, char* argv[]) {
     // calcoliamo gli ELEMENTI PER RANK a partire dal totale globale
     size_t local_count = global_count / size;
     size_t remainder   = global_count % size;
+    size_t effective_global_count = local_count * size;
 
     if (local_count == 0) {
         if (rank == 0) {
@@ -112,11 +112,11 @@ int main(int argc, char* argv[]) {
 
     // dispatch based on dtype, usando local_count
     if (dtype == "int") {
-        run_allreduce<int>(local_count, size, rank, comm, q, stream, logger, dtype);
+        run_allreduce<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "float") {
-        run_allreduce<float>(local_count, size, rank, comm, q, stream, logger, dtype);
+        run_allreduce<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "double") {
-        run_allreduce<double>(local_count, size, rank, comm, q, stream, logger, dtype);
+        run_allreduce<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else {
         if (rank == 0) {
             std::cerr << "Unsupported dtype: " << dtype << std::endl;

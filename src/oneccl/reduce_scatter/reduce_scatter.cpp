@@ -7,18 +7,17 @@
 #include <iomanip>
 #include <vector>
 
-// Template wrapper for different data types
 template <typename T>
-void run_reduce_scatter(size_t count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
+void run_reduce_scatter(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
                         Logger& logger, const std::string& data_type) {
     
     // ReduceScatter: each rank contributes count*size elements, reduces across ranks,
     // and each rank gets count elements of the reduced result (different segments)
-    size_t total_elements = count * size;
+    size_t total_elements = local_count * size;
     
     // allocate device buffers
     auto send_buf = sycl::malloc_device<T>(total_elements, q);
-    auto recv_buf = sycl::malloc_device<T>(count, q);
+    auto recv_buf = sycl::malloc_device<T>(local_count, q);
     
     // initialize send buffer
     // Each rank contributes unique data for reduction
@@ -29,7 +28,7 @@ void run_reduce_scatter(size_t count, int size, int rank, ccl::communicator& com
         });
         
         // Initialize recv buffer to detect errors
-        h.parallel_for(count, [=](auto id) {
+        h.parallel_for(local_count, [=](auto id) {
             recv_buf[id] = static_cast<T>(-1);
         });
     });
@@ -40,16 +39,16 @@ void run_reduce_scatter(size_t count, int size, int rank, ccl::communicator& com
     auto attr = ccl::create_operation_attr<ccl::reduce_scatter_attr>();
     
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::reduce_scatter(send_buf, recv_buf, count, ccl::reduction::sum, comm, stream, attr, deps).wait();
+    ccl::reduce_scatter(send_buf, recv_buf, local_count, ccl::reduction::sum, comm, stream, attr, deps).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
     // Log dei risultati
-    logger.log_result(data_type, count, size, rank, elapsed_ms);
+    logger.log_result(data_type, global_count, size, rank, elapsed_ms);
     
     std::cout << "Rank " << rank << " reduce_scatter time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms "
-              << "(received: " << count << " elements of reduced data)\n";
+              << "(received: " << local_count << " elements of reduced data)\n";
     
     // correctness check
     // Each rank receives elements [rank*count : (rank+1)*count) of the reduced array
@@ -60,9 +59,9 @@ void run_reduce_scatter(size_t count, int size, int rank, ccl::communicator& com
         h.single_task([=]() {
             bool passed = true;
             
-            for (size_t i = 0; i < count && passed; ++i) {
+            for (size_t i = 0; i < local_count && passed; ++i) {
                 // Global index for this element in the conceptual total array
-                size_t global_idx = rank * count + i;
+                size_t global_idx = rank * local_count + i;
                 
                 // Calculate expected sum: sum over all ranks of (rank+1)*(global_idx+1)
                 T expected = static_cast<T>(0);
@@ -95,14 +94,14 @@ void run_reduce_scatter(size_t count, int size, int rank, ccl::communicator& com
     if (rank == 0) {
         std::cout << "\nReduceScatter operation details:\n";
         std::cout << "  Each rank contributes: " << total_elements << " elements\n";
-        std::cout << "  Each rank receives: " << count << " elements (different segments)\n";
+        std::cout << "  Each rank receives: " << local_count << " elements (different segments)\n";
         std::cout << "  Total computation: " << size << " ranks × " << total_elements << " = " 
                   << (size * total_elements) << " reduction operations\n";
         
         std::cout << "\nSegment distribution:\n";
         for (int r = 0; r < size; ++r) {
-            std::cout << "  Rank " << r << " receives elements [" << (r * count) 
-                      << " : " << ((r + 1) * count - 1) << "] of reduced array\n";
+            std::cout << "  Rank " << r << " receives elements [" << (r * local_count) 
+                      << " : " << ((r + 1) * local_count - 1) << "] of reduced array\n";
         }
     }
     
@@ -116,7 +115,7 @@ int main(int argc, char* argv[]) {
     parser.parse();
 
     std::string dtype = parser.get<std::string>("--dtype");
-    size_t count = parser.get<size_t>("--count");
+    size_t global_count = parser.get<size_t>("--count");
 
     std::string output_dir;
     try {
@@ -126,8 +125,8 @@ int main(int argc, char* argv[]) {
     }
     
     // default value for count
-    if (count == 0) {
-        count = 1024 * 1024; // 1M elements per rank (total 1M*size per rank contribution)
+    if (global_count == 0) {
+        global_count = 1024 * 1024; // totale globale di elementi ridotti
     }
 
     // Initialize OneCCL context (MPI, CCL, devices, communicator, logger)
@@ -138,24 +137,42 @@ int main(int argc, char* argv[]) {
     auto& comm = ctx.comm;
     auto& stream = ctx.stream;
     auto& logger = ctx.logger;
+
+    size_t local_count = global_count / size;
+    size_t remainder   = global_count % size;
+    size_t effective_global_count = local_count * size;
+
+    if (local_count == 0) {
+        if (rank == 0) {
+            std::cerr << "Global count too small for size=" << size << std::endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
+    if (rank == 0 && remainder != 0) {
+        std::cerr << "Warning: global_count (" << global_count
+                  << ") is not divisible by size (" << size
+                  << "). Using local_count=" << local_count
+                  << " and ignoring last " << remainder << " elements.\n";
+    }
     
     if (rank == 0) {
         std::cout << "ReduceScatter with " << size << " processes\n";
-        std::cout << "Count per rank: " << count << " elements\n";
-        std::cout << "Total elements per rank contribution: " << (count * size) << "\n";
+        std::cout << "Global elements: " << effective_global_count << " (" << local_count << " per rank)\n";
+        std::cout << "Total elements per rank contribution: " << (local_count * size) << "\n";
         std::cout << "Reduction operation: sum\n";
     }
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_reduce_scatter<int>(count, size, rank, comm, q, stream, logger, dtype);
+        run_reduce_scatter<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "float") {
-        run_reduce_scatter<float>(count, size, rank, comm, q, stream, logger, dtype);
+        run_reduce_scatter<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else if (dtype == "double") {
-        run_reduce_scatter<double>(count, size, rank, comm, q, stream, logger, dtype);
+        run_reduce_scatter<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
-        exit(-1);
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
     
     return 0;
