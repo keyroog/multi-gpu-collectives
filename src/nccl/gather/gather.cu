@@ -21,9 +21,8 @@ __global__ void init_buffers(T* send_buf, T* recv_buf, size_t count, int size, i
     }
 }
 
-// Run NCCL gather using point-to-point sends/receives
 template<typename T>
-void run_gather(size_t count, int size, int rank, NcclContext& ctx, const std::string& data_type) {
+void run_gather(size_t local_count, size_t global_count, int size, int rank, NcclContext& ctx, const std::string& data_type) {
     int root = 0;
     // determine NCCL data type
     ncclDataType_t nccl_dtype = (data_type == "float" ? ncclFloat
@@ -31,20 +30,20 @@ void run_gather(size_t count, int size, int rank, NcclContext& ctx, const std::s
                                 : ncclInt);
 
     // allocate device buffers
-    T* send_buf; cudaMalloc(&send_buf, count * sizeof(T));
-    T* recv_buf; cudaMalloc(&recv_buf, count * size * sizeof(T));
+    T* send_buf; cudaMalloc(&send_buf, local_count * sizeof(T));
+    T* recv_buf; cudaMalloc(&recv_buf, local_count * size * sizeof(T));
 
     // initialize buffers
     int threads = 256;
-    int blocks = (count + threads - 1) / threads;
-    init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count, size, rank);
+    int blocks = (local_count + threads - 1) / threads;
+    init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, local_count, size, rank);
     cudaStreamSynchronize(ctx.stream);
 
     // warm-up non misurata
     ncclGroupStart();
     for (int peer = 0; peer < size; ++peer) {
-        if (rank == peer) ncclSend(send_buf, count, nccl_dtype, root, ctx.comm, ctx.stream);
-        if (rank == root) ncclRecv(recv_buf + peer*count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
+        if (rank == peer) ncclSend(send_buf, local_count, nccl_dtype, root, ctx.comm, ctx.stream);
+        if (rank == root) ncclRecv(recv_buf + peer * local_count, local_count, nccl_dtype, peer, ctx.comm, ctx.stream);
     }
     ncclGroupEnd();
     cudaStreamSynchronize(ctx.stream);
@@ -55,10 +54,10 @@ void run_gather(size_t count, int size, int rank, NcclContext& ctx, const std::s
         ncclGroupStart();
         for (int peer = 0; peer < size; ++peer) {
             if (rank == peer) {
-                ncclSend(send_buf, count, nccl_dtype, root, ctx.comm, ctx.stream);
+                ncclSend(send_buf, local_count, nccl_dtype, root, ctx.comm, ctx.stream);
             }
             if (rank == root) {
-                ncclRecv(recv_buf + peer * count, count, nccl_dtype, peer, ctx.comm, ctx.stream);
+                ncclRecv(recv_buf + peer * local_count, local_count, nccl_dtype, peer, ctx.comm, ctx.stream);
             }
         }
         ncclGroupEnd();
@@ -67,20 +66,20 @@ void run_gather(size_t count, int size, int rank, NcclContext& ctx, const std::s
         double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
 
         // unico log: uno a iterazione per rank
-        ctx.logger.log_result(data_type, count, size, rank, elapsed_ms);
+        ctx.logger.log_result(data_type, global_count, size, rank, elapsed_ms);
         std::cout << "Rank " << rank << " gather time (iter " << iter << "): "
                   << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     }
 
     // correctness check on root only
     if (rank == root) {
-        T* host_buf = new T[count * size];
-        cudaMemcpy(host_buf, recv_buf, count * size * sizeof(T), cudaMemcpyDeviceToHost);
+        T* host_buf = new T[local_count * size];
+        cudaMemcpy(host_buf, recv_buf, local_count * size * sizeof(T), cudaMemcpyDeviceToHost);
         bool ok = true;
         for (int src = 0; src < size && ok; ++src) {
-            for (size_t i = 0; i < count; ++i) {
+            for (size_t i = 0; i < local_count; ++i) {
                 T expected = static_cast<T>(src * 1000 + i);
-                if (host_buf[src * count + i] != expected) { ok = false; break; }
+                if (host_buf[src * local_count + i] != expected) { ok = false; break; }
             }
         }
         std::cout << (ok ? "PASSED\n" : "FAILED\n");
@@ -98,26 +97,42 @@ int main(int argc, char* argv[]) {
     parser.parse();
 
     std::string dtype = parser.get<std::string>("--dtype");
-    size_t count = parser.get<size_t>("--count");
+    size_t global_count = parser.get<size_t>("--count");
     std::string output_dir;
     try { output_dir = parser.get<std::string>("--output"); } catch (...) { output_dir = ""; }
-    if (count == 0) count = 1024 * 1024;
+    if (global_count == 0) global_count = 1024 * 1024;
 
     // Initialize NCCL context for gather
     auto ctx = init_nccl(output_dir, "gather", argc, argv);
     int size = ctx.size;
     int rank = ctx.rank;
 
+    size_t local_count = global_count / size;
+    size_t remainder   = global_count % size;
+    size_t effective_global = local_count * size;
+    if (local_count == 0) {
+        if (rank == 0) {
+            std::cerr << "Global count too small for size=" << size << std::endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    if (rank == 0 && remainder != 0) {
+        std::cerr << "Warning: global_count (" << global_count
+                  << ") is not divisible by size (" << size
+                  << "). Using local_count=" << local_count
+                  << " and ignoring last " << remainder << " elements.\n";
+    }
+
     // dispatch based on data type
     if (dtype == "int") {
-        run_gather<int>(count, size, rank, ctx, dtype);
+        run_gather<int>(local_count, effective_global, size, rank, ctx, dtype);
     } else if (dtype == "float") {
-        run_gather<float>(count, size, rank, ctx, dtype);
+        run_gather<float>(local_count, effective_global, size, rank, ctx, dtype);
     } else if (dtype == "double") {
-        run_gather<double>(count, size, rank, ctx, dtype);
+        run_gather<double>(local_count, effective_global, size, rank, ctx, dtype);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
-        return -1;
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
     return 0;
 }
