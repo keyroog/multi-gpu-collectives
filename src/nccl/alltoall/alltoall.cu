@@ -40,7 +40,8 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count_per_dest, rank, size);
     cudaStreamSynchronize(ctx.stream);
 
-    // warm-up non misurata
+    // perform alltoall and time it once
+    auto t_start = std::chrono::high_resolution_clock::now();
     ncclGroupStart();
     for (int peer = 0; peer < size; ++peer) {
         ncclRecv(recv_buf + peer * count_per_dest, count_per_dest, nccl_dtype, peer, ctx.comm, ctx.stream);
@@ -48,23 +49,11 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
     }
     ncclGroupEnd();
     cudaStreamSynchronize(ctx.stream);
-
-    // perform alltoall and time it 5 times
-    for (int iter = 0; iter < 5; ++iter) {
-        auto t_start = std::chrono::high_resolution_clock::now();
-        ncclGroupStart();
-        for (int peer = 0; peer < size; ++peer) {
-            ncclRecv(recv_buf + peer * count_per_dest, count_per_dest, nccl_dtype, peer, ctx.comm, ctx.stream);
-            ncclSend(send_buf + peer * count_per_dest, count_per_dest, nccl_dtype, peer, ctx.comm, ctx.stream);
-        }
-        ncclGroupEnd();
-        cudaStreamSynchronize(ctx.stream);
-        auto t_end = std::chrono::high_resolution_clock::now();
-        double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
-        ctx.logger.log_result(data_type, global_count, size, rank, elapsed_ms);
-        std::cout << "Rank " << rank << " alltoall time (iter " << iter << "): "
-                  << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
-    }
+    auto t_end = std::chrono::high_resolution_clock::now();
+    double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
+    ctx.logger.log_result(data_type, global_count, size, rank, elapsed_ms);
+    std::cout << "Rank " << rank << " alltoall time: "
+              << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
 
     // correctness check
     T* host_buf = new T[count_per_dest * size];

@@ -42,21 +42,15 @@ void run_broadcast(size_t local_count, size_t global_count, int size, int rank, 
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, local_count, rank, root);
     cudaStreamSynchronize(ctx.stream);
 
-    // warm-up non misurata
+    // perform broadcast and time it once
+    auto t_start = std::chrono::high_resolution_clock::now();
     ncclBroadcast(send_buf, recv_buf, local_count, nccl_dtype, root, ctx.comm, ctx.stream);
     cudaStreamSynchronize(ctx.stream);
-
-    // perform broadcast and time it 5 times
-    for (int iter = 0; iter < 5; ++iter) {
-        auto t_start = std::chrono::high_resolution_clock::now();
-        ncclBroadcast(send_buf, recv_buf, local_count, nccl_dtype, root, ctx.comm, ctx.stream);
-        cudaStreamSynchronize(ctx.stream);
-        auto t_end = std::chrono::high_resolution_clock::now();
-        double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
-        ctx.logger.log_result(data_type, global_count, size, rank, elapsed_ms);
-        std::cout << "Rank " << rank << " broadcast time (iter " << iter << "): "
-                  << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
-    }
+    auto t_end = std::chrono::high_resolution_clock::now();
+    double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
+    ctx.logger.log_result(data_type, global_count, size, rank, elapsed_ms);
+    std::cout << "Rank " << rank << " broadcast time: "
+              << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
 
     // correctness check
     T* host_buf = new T[local_count];
