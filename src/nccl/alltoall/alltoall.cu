@@ -51,7 +51,6 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
     cudaStreamSynchronize(ctx.stream);
     auto t_end = std::chrono::high_resolution_clock::now();
     double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
-    ctx.logger.log_result(data_type, global_count, size, rank, elapsed_ms);
     std::cout << "Rank " << rank << " alltoall time: "
               << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
 
@@ -66,6 +65,7 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
         }
     }
     std::cout << (ok ? "PASSED\n" : "FAILED\n");
+    ctx.logger.log_result(data_type, global_count, size, rank, ok, elapsed_ms);
     delete[] host_buf;
 
     cudaFree(send_buf);

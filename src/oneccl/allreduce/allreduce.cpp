@@ -30,9 +30,6 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     auto t_end = std::chrono::high_resolution_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
-    // Log dei risultati
-    logger.log_result(data_type, global_count, size, rank, elapsed_ms);
-    
     std::cout << "Rank " << rank << " allreduce time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     // correctness check
     sycl::buffer<T> check_buf(local_count);
@@ -44,12 +41,24 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     });
     q.wait_and_throw();
     // print result
+    bool ok = false;
     {
         sycl::host_accessor acc(check_buf, sycl::read_only);
         size_t i = 0;
-        for (; i < local_count; ++i) if (acc[i] == static_cast<T>(-1)) { std::cout << "FAILED\n"; break; }
-        if (i == local_count) std::cout << "PASSED\n";
+        for (; i < local_count; ++i) {
+            if (acc[i] == static_cast<T>(-1)) {
+                ok = false;
+                break;
+            }
+        }
+        if (i == local_count) {
+            ok = true;
+            std::cout << "PASSED\n";
+        } else {
+            std::cout << "FAILED\n";
+        }
     }
+    logger.log_result(data_type, global_count, size, rank, ok, elapsed_ms);
     sycl::free(send_buf, q);
     sycl::free(recv_buf, q);
 }

@@ -40,12 +40,10 @@ void run_reduce(size_t local_count, size_t global_count, int size, int rank, ccl
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
-    // Log dei risultati
-    logger.log_result(data_type, global_count, size, rank, elapsed_ms);
-    
     std::cout << "Rank " << rank << " reduce time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     
     // correctness check - only root rank has valid results
+    bool ok = true;
     if (rank == root_rank) {
         sycl::buffer<T> check_buf(1);  // Single flag for pass/fail
         q.submit([&](auto& h) {
@@ -68,7 +66,8 @@ void run_reduce(size_t local_count, size_t global_count, int size, int rank, ccl
         // print result (only root rank)
         {
             sycl::host_accessor acc(check_buf, sycl::read_only);
-            if (acc[0] == static_cast<T>(1)) {
+            ok = (acc[0] == static_cast<T>(1));
+            if (ok) {
                 std::cout << "Root rank " << root_rank << " PASSED\n";
             } else {
                 std::cout << "Root rank " << root_rank << " FAILED\n";
@@ -78,6 +77,8 @@ void run_reduce(size_t local_count, size_t global_count, int size, int rank, ccl
         // Non-root ranks should not have valid data in recv_buf after reduce
         std::cout << "Rank " << rank << " (non-root) completed reduce operation\n";
     }
+    MPI_Bcast(&ok, 1, MPI_C_BOOL, root_rank, MPI_COMM_WORLD);
+    logger.log_result(data_type, global_count, size, rank, ok, elapsed_ms);
     
     sycl::free(send_buf, q);
     sycl::free(recv_buf, q);

@@ -55,16 +55,14 @@ void run_gather(size_t local_count, size_t global_count, int size, int rank, Ncc
     auto t_end = std::chrono::high_resolution_clock::now();
     double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
 
-    // log result once per rank
-    ctx.logger.log_result(data_type, global_count, size, rank, elapsed_ms);
     std::cout << "Rank " << rank << " gather time: "
               << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
 
     // correctness check on root only
+    bool ok = true;
     if (rank == root) {
         T* host_buf = new T[local_count * size];
         cudaMemcpy(host_buf, recv_buf, local_count * size * sizeof(T), cudaMemcpyDeviceToHost);
-        bool ok = true;
         for (int src = 0; src < size && ok; ++src) {
             for (size_t i = 0; i < local_count; ++i) {
                 T expected = static_cast<T>(src * 1000 + i);
@@ -74,6 +72,8 @@ void run_gather(size_t local_count, size_t global_count, int size, int rank, Ncc
         std::cout << (ok ? "PASSED\n" : "FAILED\n");
         delete[] host_buf;
     }
+    MPI_Bcast(&ok, 1, MPI_C_BOOL, root, MPI_COMM_WORLD);
+    ctx.logger.log_result(data_type, global_count, size, rank, ok, elapsed_ms);
 
     // cleanup
     cudaFree(send_buf);

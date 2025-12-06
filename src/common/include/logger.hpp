@@ -205,7 +205,7 @@ private:
     }
     
     void write_header(std::ofstream& file) const {
-        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,gpu_mode,time_ms\n";
+        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,gpu_mode,test_passed,time_ms\n";
     }
 
 public:
@@ -232,7 +232,7 @@ public:
         // env_vars = capture_env();
     }
     
-    void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, double time_ms) {
+    void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, bool test_passed, double time_ms) {
         if (output_dir.empty()) {
             // Se non è specificato un output directory, non loggare su file
             return;
@@ -289,11 +289,12 @@ public:
              << rank << ","
              << hostname << ","
              << node_id << ","
-             << total_nodes << ","
-             << (is_multi_node ? "true" : "false") << ","
-             << run_id << ","
-             << gpu_mode << ","
-             << std::fixed << std::setprecision(3) << time_ms << "\n";
+         << total_nodes << ","
+         << (is_multi_node ? "true" : "false") << ","
+         << run_id << ","
+         << gpu_mode << ","
+         << (test_passed ? "true" : "false") << ","
+         << std::fixed << std::setprecision(3) << time_ms << "\n";
         
         file.close();
         
@@ -301,7 +302,8 @@ public:
         std::cout << "[LOG] " << library_name << " " << collective_name 
                   << " " << data_type << " size=" << message_size_elements 
                   << " rank=" << rank << " hostname=" << hostname << " node=" << node_id
-                  << " run=" << run_id << " gpu_mode=" << gpu_mode << " time=" << time_ms << "ms" << " -> " << filename << std::endl;
+                  << " run=" << run_id << " gpu_mode=" << gpu_mode << " passed=" << (test_passed ? "true" : "false")
+                  << " time=" << time_ms << "ms" << " -> " << filename << std::endl;
     }
     
     // Metodo per impostare manualmente il run_id (opzionale)
@@ -325,6 +327,6 @@ public:
         std::cout << "  --output <path>  : Directory path for logging results (optional)" << std::endl;
         std::cout << "  If --output is not specified, results will only be printed to console" << std::endl;
         std::cout << "\nOutput format: CSV files with columns:" << std::endl;
-        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, gpu_mode, time_ms" << std::endl;
+        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, gpu_mode, test_passed, time_ms" << std::endl;
     }
 };

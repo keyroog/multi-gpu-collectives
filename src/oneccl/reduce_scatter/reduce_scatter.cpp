@@ -44,9 +44,6 @@ void run_reduce_scatter(size_t local_count, size_t global_count, int size, int r
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
-    // Log dei risultati
-    logger.log_result(data_type, global_count, size, rank, elapsed_ms);
-    
     std::cout << "Rank " << rank << " reduce_scatter time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms "
               << "(received: " << local_count << " elements of reduced data)\n";
     
@@ -81,14 +78,17 @@ void run_reduce_scatter(size_t local_count, size_t global_count, int size, int r
     q.wait_and_throw();
     
     // print result
+    bool ok = false;
     {
         sycl::host_accessor acc(check_buf, sycl::read_only);
-        if (acc[0] == static_cast<T>(1)) {
+        ok = (acc[0] == static_cast<T>(1));
+        if (ok) {
             std::cout << "Rank " << rank << " PASSED\n";
         } else {
             std::cout << "Rank " << rank << " FAILED\n";
         }
     }
+    logger.log_result(data_type, global_count, size, rank, ok, elapsed_ms);
     
     // Print segment information (only from rank 0 to avoid spam)
     if (rank == 0) {
