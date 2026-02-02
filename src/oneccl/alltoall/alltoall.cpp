@@ -8,7 +8,7 @@
 
 template <typename T>
 void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
-                  Logger& logger, const std::string& data_type) {
+                  Logger& logger, const std::string& data_type, ccl::datatype ccl_dtype) {
     // allocate device buffers
     // send_buf contains count*size elements (count elements for each destination rank)
     // recv_buf will contain count*size elements (count elements from each source rank)
@@ -30,12 +30,13 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
     });
     
     // perform alltoall
-    std::vector<ccl::event> deps;
-    deps.push_back(ccl::create_event(e));
-    auto attr = ccl::create_operation_attr<ccl::alltoall_attr>();
-    
+    q.wait();
+
+    // warmup run (non cronometrata)
+    ccl::alltoall((void*)send_buf, (void*)recv_buf, count_per_dest, ccl_dtype, comm, stream).wait();
+
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::alltoall(send_buf, recv_buf, count_per_dest, comm, stream, attr, deps).wait();
+    ccl::alltoall((void*)send_buf, (void*)recv_buf, count_per_dest, ccl_dtype, comm, stream).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
@@ -137,11 +138,11 @@ int main(int argc, char* argv[]) {
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_alltoall<int>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_alltoall<int>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::int32);
     } else if (dtype == "float") {
-        run_alltoall<float>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_alltoall<float>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float32);
     } else if (dtype == "double") {
-        run_alltoall<double>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_alltoall<double>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float64);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);

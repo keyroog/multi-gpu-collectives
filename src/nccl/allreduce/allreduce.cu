@@ -41,6 +41,10 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     T check_sum = static_cast<T>(0);
     for (int i = 1; i <= size; ++i) check_sum += static_cast<T>(i);
 
+    // warmup run (non cronometrata)
+    ncclAllReduce(send_buf, recv_buf, local_count, nccl_dtype, ncclSum, ctx.comm, ctx.stream);
+    cudaStreamSynchronize(ctx.stream);
+
     // perform allreduce and time it once
     auto t_start = std::chrono::high_resolution_clock::now();
     ncclAllReduce(send_buf, recv_buf, local_count, nccl_dtype, ncclSum, ctx.comm, ctx.stream);

@@ -8,7 +8,7 @@
 
 template <typename T>
 void run_allgather(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
-                   Logger& logger, const std::string& data_type) {
+                   Logger& logger, const std::string& data_type, ccl::datatype ccl_dtype) {
     // allocate device buffers
     // send_buf contains count elements from this rank
     // recv_buf will contain count*size elements (count from each rank)
@@ -27,12 +27,10 @@ void run_allgather(size_t local_count, size_t global_count, int size, int rank, 
     });
     
     // perform allgather
-    std::vector<ccl::event> deps;
-    deps.push_back(ccl::create_event(e));
-    auto attr = ccl::create_operation_attr<ccl::allgather_attr>();
-    
+    q.wait();
+
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::allgather(send_buf, recv_buf, local_count, comm, stream, attr, deps).wait();
+    ccl::allgather((void*)send_buf, (void*)recv_buf, local_count, ccl_dtype, comm, stream).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
@@ -125,11 +123,11 @@ int main(int argc, char* argv[]) {
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_allgather<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allgather<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::int32);
     } else if (dtype == "float") {
-        run_allgather<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allgather<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float32);
     } else if (dtype == "double") {
-        run_allgather<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allgather<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float64);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);

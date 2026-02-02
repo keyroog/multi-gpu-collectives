@@ -20,6 +20,8 @@ scripts/
   leonardo/                  # SLURM template & environment setup for Leonardo cluster
     run_nccl.sbatch
     set_nccl_env.sh
+  unisa-hpc/                 # Benchmark scripts for UNISA-HPC cluster
+    run_benchmark.sh         # Message-size sweep runner (interactive sessions)
   plots/
     plot_nccl_results.py     # CSV aggregation & visualization
   python/
@@ -41,11 +43,11 @@ src/
 - MPI implementation (OpenMPI, MPICH, etc.)
 - NVIDIA Management Library (`libnvidia-ml.so`), automatically linked via the Makefile
 
-### oneCCL toolchain (experimental)
-- Intel oneAPI DPC++/C++ compiler (`icpx`)
+### oneCCL toolchain
+- DPC++/C++ compiler with SYCL support (`icpx` or custom `clang++` with `-fsycl`)
 - Intel oneCCL runtime and headers
 - MPI implementation compatible with oneCCL
-- Level Zero drivers for GPU access; toggle `--gpu_mode tile` to target sub-device tiles
+- GPU drivers (Level Zero or CUDA via SYCL); toggle `--gpu_mode tile` to target sub-device tiles where supported
 
 ### Python utilities
 - Python ≥ 3.8
@@ -68,7 +70,16 @@ make oneccl
 make clean
 ```
 
-> If the linker cannot find CUDA/NCCL/MPI libraries, ensure the relevant modules are loaded or extend the `NCCL_LIBS`/`ONECCL_LIBS` variables with `-L`/`-I` flags to your installation paths.
+The Makefile picks up toolchain paths from environment variables. Set them before building:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `NVCC` | CUDA compiler | `nvcc` |
+| `NCCL_ROOT` | NCCL install prefix (expects `include/`, `lib/`) | _(none)_ |
+| `DPCPP_CLANGXX` | DPC++ compiler with SYCL support | falls back to `icpx` |
+| `DPCPP_LIB` | DPC++ runtime library path | _(none)_ |
+| `ONECCL_INSTALL` | oneCCL install prefix | _(none)_ |
+| `SYCL_TARGET` | `-fsycl-targets` value | `nvptx64-nvidia-cuda` |
 
 ## Running benchmarks manually
 Every binary expects at least the data type and element count. Optionally pass `--output` to persist CSV results.
@@ -84,15 +95,15 @@ srun -N 1 -n 4 --gpus-per-node=4 \
 
 CLI switches:
 - `--dtype`: `int`, `float`, or `double`
-- `--count`: element count per rank (bytes = `count × sizeof(dtype)`)
+- `--count`: **global** element count across all ranks (bytes = `count × sizeof(dtype)`). The program divides internally by `num_ranks` for allreduce or by `num_ranks²` for alltoall
 - `--output`: directory that will receive `{library}_{collective}_{dtype}_{count}_results.csv`
 - `--gpu_mode`: oneCCL only; `gpu` (default) or `tile` to map ranks to Xe GPU tiles
 
- Each run performs a warm-up + 5 timed iterations and executes a correctness check that inspects the device buffer on the host.
+Each invocation performs one warm-up call (not timed) followed by a single timed iteration, plus a correctness check that copies the device buffer back to the host. To collect multiple samples, invoke the binary several times (the benchmark script does this automatically).
 
 ### oneCCL specifics
 
-oneCCL executables live under `build/oneccl/` and mirror the NCCL CLI. A typical invocation on Level Zero hardware looks like:
+oneCCL executables live under `build/oneccl/` and mirror the NCCL CLI. A typical invocation looks like:
 
 ```sh
 source /opt/intel/oneapi/setvars.sh    # ensure DPC++/oneCCL toolchain is on PATH
@@ -104,7 +115,7 @@ mpirun -n 4 \
   --output logs/oneccl/allreduce
 ```
 
-- MPI ranks are mapped to devices through Level Zero; use `--gpu_mode gpu` (default) to bind ranks to full GPUs or `--gpu_mode tile` to assign each rank to a Xe tile/sub-device.
+- MPI ranks are mapped to devices using the node-local rank; use `--gpu_mode gpu` (default) to bind ranks to full GPUs or `--gpu_mode tile` to assign each rank to a sub-device tile.
 - The logging pipeline is identical to NCCL, so existing plotting scripts can ingest oneCCL CSVs alongside NCCL results.
 
 ## Batch submission workflow (SLURM)
@@ -129,13 +140,43 @@ Defaults baked into `nccl_exec.py`:
 
 > Update those paths (and the `#SBATCH` metadata inside `scripts/leonardo/run_nccl.sbatch`) to match your cluster. The sbatch template sources `set_nccl_env.sh` to load CUDA/MPI/NCCL modules before launching `srun`.
 
+## Interactive benchmark runner (UNISA-HPC)
+
+For clusters where you work inside interactive `srun` sessions, use the dedicated benchmark script:
+
+```sh
+# 1. Get an interactive session with GPUs
+srun --partition gpuq -A usershpc --gres=gpu:4 -N 1 -n 4 --pty bash
+
+# 2. Load environment
+source $HOME/scripts/export_variables.sh
+
+# 3. Run benchmarks
+scripts/unisa-hpc/run_benchmark.sh nccl allreduce float
+scripts/unisa-hpc/run_benchmark.sh oneccl allreduce float
+scripts/unisa-hpc/run_benchmark.sh nccl alltoall float
+scripts/unisa-hpc/run_benchmark.sh oneccl alltoall float
+```
+
+The script sweeps 11 message sizes (1 B to 1 GiB) and runs 5 iterations per size. Sizes that are too small for the chosen dtype/collective/GPU count are skipped automatically.
+
+Environment variables for customisation:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `NUM_GPUS` | Number of MPI ranks / GPUs | `4` |
+| `NUM_ITERS` | Iterations per message size | `5` |
+| `PROJECT_ROOT` | Project root path | `$HOME/multi-gpu-collectives` |
+
+Results are written to `results/unisa-hpc/{nccl,oneccl}/`.
+
 ## Output artefacts
 ### CSV logs
 Each iteration appends a record to `${output_dir}/nccl_<collective>_<dtype>_<count>_results.csv` (or the oneCCL equivalent). Columns correspond to the `Logger` header:
 
 ```
 timestamp, library, collective, data_type, message_size_bytes, message_size_elements,
-num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, gpu_mode, time_ms
+num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, gpu_mode, test_passed, time_ms
 ```
 
 ### SLURM stdout/stderr

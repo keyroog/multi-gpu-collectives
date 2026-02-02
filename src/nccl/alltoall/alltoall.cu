@@ -40,14 +40,13 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count_per_dest, rank, size);
     cudaStreamSynchronize(ctx.stream);
 
+    // warmup run (non cronometrata)
+    ncclAllToAll(send_buf, recv_buf, count_per_dest, nccl_dtype, ctx.comm, ctx.stream);
+    cudaStreamSynchronize(ctx.stream);
+
     // perform alltoall and time it once
     auto t_start = std::chrono::high_resolution_clock::now();
-    ncclGroupStart();
-    for (int peer = 0; peer < size; ++peer) {
-        ncclRecv(recv_buf + peer * count_per_dest, count_per_dest, nccl_dtype, peer, ctx.comm, ctx.stream);
-        ncclSend(send_buf + peer * count_per_dest, count_per_dest, nccl_dtype, peer, ctx.comm, ctx.stream);
-    }
-    ncclGroupEnd();
+    ncclAllToAll(send_buf, recv_buf, count_per_dest, nccl_dtype, ctx.comm, ctx.stream);
     cudaStreamSynchronize(ctx.stream);
     auto t_end = std::chrono::high_resolution_clock::now();
     double elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;

@@ -8,7 +8,7 @@
 
 template <typename T>
 void run_broadcast(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
-                   Logger& logger, const std::string& data_type, int root_rank) {
+                   Logger& logger, const std::string& data_type, int root_rank, ccl::datatype ccl_dtype) {
     // allocate device buffer
     // For broadcast, we use the same buffer for send and receive
     auto buf = sycl::malloc_device<T>(local_count, q);
@@ -27,12 +27,10 @@ void run_broadcast(size_t local_count, size_t global_count, int size, int rank, 
     });
     
     // perform broadcast
-    std::vector<ccl::event> deps;
-    deps.push_back(ccl::create_event(e));
-    auto attr = ccl::create_operation_attr<ccl::broadcast_attr>();
-    
+    q.wait();
+
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::broadcast(buf, local_count, root_rank, comm, stream, attr, deps).wait();
+    ccl::broadcast((void*)buf, local_count, ccl_dtype, root_rank, comm, stream).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
@@ -144,11 +142,11 @@ int main(int argc, char* argv[]) {
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_broadcast<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_broadcast<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank, ccl::datatype::int32);
     } else if (dtype == "float") {
-        run_broadcast<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_broadcast<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank, ccl::datatype::float32);
     } else if (dtype == "double") {
-        run_broadcast<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_broadcast<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank, ccl::datatype::float64);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);

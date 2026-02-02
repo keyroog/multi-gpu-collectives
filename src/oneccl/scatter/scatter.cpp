@@ -8,7 +8,7 @@
 
 template <typename T>
 void run_scatter(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
-                 Logger& logger, const std::string& data_type, int root_rank) {
+                 Logger& logger, const std::string& data_type, int root_rank, ccl::datatype ccl_dtype) {
     // allocate device buffers
     // send_buf is only meaningful on root rank - contains count*size elements
     // recv_buf is meaningful on all ranks - contains count elements
@@ -38,12 +38,10 @@ void run_scatter(size_t local_count, size_t global_count, int size, int rank, cc
     });
     
     // perform scatter
-    std::vector<ccl::event> deps;
-    deps.push_back(ccl::create_event(e));
-    auto attr = ccl::create_operation_attr<ccl::scatter_attr>();
-    
+    q.wait();
+
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::scatter(send_buf, recv_buf, local_count, root_rank, comm, stream, attr, deps).wait();
+    ccl::scatter((void*)send_buf, (void*)recv_buf, local_count, ccl_dtype, root_rank, comm, stream).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
@@ -156,11 +154,11 @@ int main(int argc, char* argv[]) {
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_scatter<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_scatter<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank, ccl::datatype::int32);
     } else if (dtype == "float") {
-        run_scatter<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_scatter<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank, ccl::datatype::float32);
     } else if (dtype == "double") {
-        run_scatter<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank);
+        run_scatter<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, root_rank, ccl::datatype::float64);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);

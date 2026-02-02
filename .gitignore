@@ -34,3 +34,9 @@
 
 /logs
 /plots
+/build
+/build/*
+/tmp
+/dist
+/.vscode
+/results

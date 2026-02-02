@@ -6,27 +6,28 @@
 #include <string>
 
 template <typename T>
-void run_allreduce(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
-                  Logger& logger, const std::string& data_type) {
+void run_allreduce(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream,
+                  Logger& logger, const std::string& data_type, ccl::datatype ccl_dtype) {
     // allocate device buffers
     auto send_buf = sycl::malloc_device<T>(local_count, q);
     auto recv_buf = sycl::malloc_device<T>(local_count, q);
     // initialize buffers
-    auto e = q.submit([&](auto& h) {
+    q.submit([&](auto& h) {
         h.parallel_for(local_count, [=](auto id) {
             send_buf[id] = static_cast<T>(rank + id + 1);
             recv_buf[id] = static_cast<T>(-1);
         });
     });
+    q.wait();
     // compute expected sum
     T check_sum = static_cast<T>(0);
     for (int i = 1; i <= size; ++i) check_sum += static_cast<T>(i);
-    // perform allreduce
-    std::vector<ccl::event> deps;
-    deps.push_back(ccl::create_event(e));
-    auto attr = ccl::create_operation_attr<ccl::allreduce_attr>();
+    // warmup run (non cronometrata)
+    ccl::allreduce(send_buf, recv_buf, local_count, ccl_dtype, ccl::reduction::sum, comm, stream).wait();
+
+    // perform allreduce (use void* API with explicit datatype for NCCL backend compatibility)
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::allreduce(send_buf, recv_buf, local_count, ccl::reduction::sum, comm, stream, attr, deps).wait();
+    ccl::allreduce(send_buf, recv_buf, local_count, ccl_dtype, ccl::reduction::sum, comm, stream).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
@@ -121,11 +122,11 @@ int main(int argc, char* argv[]) {
 
     // dispatch based on dtype, usando local_count
     if (dtype == "int") {
-        run_allreduce<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allreduce<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::int32);
     } else if (dtype == "float") {
-        run_allreduce<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allreduce<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float32);
     } else if (dtype == "double") {
-        run_allreduce<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allreduce<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float64);
     } else {
         if (rank == 0) {
             std::cerr << "Unsupported dtype: " << dtype << std::endl;

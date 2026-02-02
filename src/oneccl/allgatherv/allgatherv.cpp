@@ -18,7 +18,8 @@ void run_allgatherv(const std::vector<size_t>& recv_counts,
                     sycl::queue& q,
                     ccl::stream stream,
                     Logger& logger,
-                    const std::string& data_type) {
+                    const std::string& data_type,
+                    ccl::datatype ccl_dtype) {
     size_t send_count = recv_counts[rank];
     size_t total_recv_count = std::accumulate(recv_counts.begin(), recv_counts.end(), 0UL);
 
@@ -42,13 +43,10 @@ void run_allgatherv(const std::vector<size_t>& recv_counts,
     });
     
     // perform allgatherv
-    std::vector<ccl::event> deps;
-    deps.push_back(ccl::create_event(e1));
-    deps.push_back(ccl::create_event(e2));
-    auto attr = ccl::create_operation_attr<ccl::allgatherv_attr>();
-    
+    q.wait();
+
     auto t_start = std::chrono::high_resolution_clock::now();
-    ccl::allgatherv(send_buf, send_count, recv_buf, recv_counts, comm, stream, attr, deps).wait();
+    ccl::allgatherv((void*)send_buf, send_count, (void*)recv_buf, recv_counts, ccl_dtype, comm, stream).wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
@@ -183,11 +181,11 @@ int main(int argc, char* argv[]) {
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_allgatherv<int>(recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allgatherv<int>(recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::int32);
     } else if (dtype == "float") {
-        run_allgatherv<float>(recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allgatherv<float>(recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float32);
     } else if (dtype == "double") {
-        run_allgatherv<double>(recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype);
+        run_allgatherv<double>(recv_counts, recv_displs, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float64);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);

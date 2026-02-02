@@ -23,7 +23,6 @@ sycl::device pick_device_for_rank(int rank, const std::string& gpu_mode) {
 
     for (const auto& plat : sycl::platform::get_platforms()) {
         auto name = plat.get_info<sycl::info::platform::name>();
-        if (name.find("Level-Zero") == std::string::npos) continue;
 
         for (const auto& root : plat.get_devices()) {
             if (!root.is_gpu()) continue;
@@ -57,8 +56,16 @@ inline OneCCLContext init_oneccl(const std::string& output_dir,
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    // Scegli il (sub)device per questo rank
-    sycl::device dev = pick_device_for_rank(rank, gpu_mode);
+    // Create a node-local communicator to get the local rank
+    MPI_Comm local_comm;
+    int local_rank;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &local_comm);
+    MPI_Comm_rank(local_comm, &local_rank);
+
+    // Use local rank to select the device on this node
+    sycl::device dev = pick_device_for_rank(local_rank, gpu_mode);
+
+    MPI_Comm_free(&local_comm);
 
     // Context e queue SOLO su quel (sub)device (best practice)
     sycl::context ctx(dev);
