@@ -34,9 +34,11 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
 
     // warmup run (non cronometrata)
     ccl::alltoall((void*)send_buf, (void*)recv_buf, count_per_dest, ccl_dtype, comm, stream).wait();
+    q.wait();
 
     auto t_start = std::chrono::high_resolution_clock::now();
     ccl::alltoall((void*)send_buf, (void*)recv_buf, count_per_dest, ccl_dtype, comm, stream).wait();
+    q.wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;

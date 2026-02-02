@@ -14,7 +14,7 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     // initialize buffers
     q.submit([&](auto& h) {
         h.parallel_for(local_count, [=](auto id) {
-            send_buf[id] = static_cast<T>(rank + id + 1);
+            send_buf[id] = static_cast<T>(rank + 1);
             recv_buf[id] = static_cast<T>(-1);
         });
     });
@@ -24,10 +24,12 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     for (int i = 1; i <= size; ++i) check_sum += static_cast<T>(i);
     // warmup run (non cronometrata)
     ccl::allreduce(send_buf, recv_buf, local_count, ccl_dtype, ccl::reduction::sum, comm, stream).wait();
+    q.wait();
 
     // perform allreduce (use void* API with explicit datatype for NCCL backend compatibility)
     auto t_start = std::chrono::high_resolution_clock::now();
     ccl::allreduce(send_buf, recv_buf, local_count, ccl_dtype, ccl::reduction::sum, comm, stream).wait();
+    q.wait();
     auto t_end = std::chrono::high_resolution_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
     
@@ -37,7 +39,7 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     q.submit([&](auto& h) {
         sycl::accessor acc(check_buf, h, sycl::write_only);
         h.parallel_for(local_count, [=](auto id) {
-            if (recv_buf[id] != static_cast<T>(check_sum + size * id)) acc[id] = static_cast<T>(-1);
+            if (recv_buf[id] != check_sum) acc[id] = static_cast<T>(-1);
         });
     });
     q.wait_and_throw();

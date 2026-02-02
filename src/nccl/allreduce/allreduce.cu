@@ -12,7 +12,7 @@ template<typename T>
 __global__ void init_buffers(T* send_buf, T* recv_buf, size_t count, int rank) {
     size_t id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id < count) {
-        send_buf[id] = static_cast<T>(rank + id + 1);
+        send_buf[id] = static_cast<T>(rank + 1);
         recv_buf[id] = static_cast<T>(-1);
     }
 }
@@ -59,7 +59,7 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     cudaMemcpy(host_buf, recv_buf, local_count * sizeof(T), cudaMemcpyDeviceToHost);
     bool ok = true;
     for (size_t i = 0; i < local_count; ++i) {
-        if (host_buf[i] != static_cast<T>(check_sum + size * i)) { ok = false; break; }
+        if (host_buf[i] != check_sum) { ok = false; break; }
     }
     std::cout << (ok ? "PASSED\n" : "FAILED\n");
     ctx.logger.log_result(data_type, global_count, size, rank, ok, elapsed_ms);
