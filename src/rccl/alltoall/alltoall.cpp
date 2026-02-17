@@ -1,5 +1,5 @@
-// filepath: src/nccl/alltoall/alltoall.cu
-#include "../common/nccl_context.hpp"
+// filepath: src/rccl/alltoall/alltoall.cpp
+#include "../common/rccl_context.hpp"
 #include "../../common/include/arg_parser.hpp"
 #include "../../common/include/logger.hpp"
 #include <mpi.h>
@@ -7,7 +7,7 @@
 #include <iomanip>
 #include <string>
 
-// Kernel to initialize device buffers for alltoall
+// HIP kernel to initialize device buffers for alltoall
 template<typename T>
 __global__ void init_buffers(T* send_buf, T* recv_buf, size_t count, int rank, int size) {
     size_t id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -21,8 +21,8 @@ __global__ void init_buffers(T* send_buf, T* recv_buf, size_t count, int rank, i
 }
 
 template<typename T>
-void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank, NcclContext& ctx, const std::string& data_type) {
-    // determine NCCL data type
+void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank, RcclContext& ctx, const std::string& data_type) {
+    // determine RCCL data type (same API as NCCL)
     ncclDataType_t nccl_dtype;
     if (data_type == "int") nccl_dtype = ncclInt;
     else if (data_type == "float") nccl_dtype = ncclFloat;
@@ -31,23 +31,33 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
     // allocate device buffers
     T* send_buf;
     T* recv_buf;
-    cudaMalloc(&send_buf, count_per_dest * size * sizeof(T));
-    cudaMalloc(&recv_buf, count_per_dest * size * sizeof(T));
+    hipMalloc(&send_buf, count_per_dest * size * sizeof(T));
+    hipMalloc(&recv_buf, count_per_dest * size * sizeof(T));
 
     // initialize buffers
     int threads = 256;
     int blocks = (count_per_dest * size + threads - 1) / threads;
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count_per_dest, rank, size);
-    cudaStreamSynchronize(ctx.stream);
+    hipStreamSynchronize(ctx.stream);
 
     // warmup run (non cronometrata)
-    ncclAlltoAll(send_buf, recv_buf, count_per_dest, nccl_dtype, ctx.comm, ctx.stream);
-    cudaStreamSynchronize(ctx.stream);
+    ncclGroupStart();
+    for (int i = 0; i < size; ++i) {
+        ncclSend(send_buf + i * count_per_dest, count_per_dest, nccl_dtype, i, ctx.comm, ctx.stream);
+        ncclRecv(recv_buf + i * count_per_dest, count_per_dest, nccl_dtype, i, ctx.comm, ctx.stream);
+    }
+    ncclGroupEnd();
+    hipStreamSynchronize(ctx.stream);
 
     // perform alltoall and time it once
     double t_start = MPI_Wtime();
-    ncclAlltoAll(send_buf, recv_buf, count_per_dest, nccl_dtype, ctx.comm, ctx.stream);
-    cudaStreamSynchronize(ctx.stream);
+    ncclGroupStart();
+    for (int i = 0; i < size; ++i) {
+        ncclSend(send_buf + i * count_per_dest, count_per_dest, nccl_dtype, i, ctx.comm, ctx.stream);
+        ncclRecv(recv_buf + i * count_per_dest, count_per_dest, nccl_dtype, i, ctx.comm, ctx.stream);
+    }
+    ncclGroupEnd();
+    hipStreamSynchronize(ctx.stream);
     double t_end = MPI_Wtime();
     double elapsed_ms = (t_end - t_start) * 1000.0;
     std::cout << "Rank " << rank << " alltoall time: "
@@ -55,7 +65,7 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
 
     // correctness check
     T* host_buf = new T[count_per_dest * size];
-    cudaMemcpy(host_buf, recv_buf, count_per_dest * size * sizeof(T), cudaMemcpyDeviceToHost);
+    hipMemcpy(host_buf, recv_buf, count_per_dest * size * sizeof(T), hipMemcpyDeviceToHost);
     bool ok = true;
     for (int src = 0; src < size && ok; ++src) {
         for (size_t i = 0; i < count_per_dest; ++i) {
@@ -67,8 +77,8 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
     ctx.logger.log_result(data_type, global_count, size, rank, ok, ctx.init_time_ms, elapsed_ms);
     delete[] host_buf;
 
-    cudaFree(send_buf);
-    cudaFree(recv_buf);
+    hipFree(send_buf);
+    hipFree(recv_buf);
 }
 
 int main(int argc, char* argv[]) {
@@ -86,8 +96,8 @@ int main(int argc, char* argv[]) {
     }
     if (global_count == 0) global_count = 1024 * 1024;
 
-    // Initialize NCCL context for alltoall
-    auto ctx = init_nccl(output_dir, "alltoall", argc, argv);
+    // Initialize RCCL context for alltoall
+    auto ctx = init_rccl(output_dir, "alltoall", argc, argv);
     int size = ctx.size;
     int rank = ctx.rank;
 
@@ -120,6 +130,6 @@ int main(int argc, char* argv[]) {
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
-    finalize_nccl(ctx);
+    finalize_rccl(ctx);
     return 0;
 }

@@ -14,9 +14,27 @@ NVCC       ?= nvcc
 # DPCPP_CLANGXX  - path to clang++ with SYCL support (falls back to icpx)
 # DPCPP_LIB      - path to DPC++ runtime libraries
 # ONECCL_INSTALL - root of oneCCL installation (expects include/ and lib/ subdirs)
-# SYCL_TARGET    - fsycl-targets value (e.g. nvidia_gpu_sm80, nvptx64-nvidia-cuda)
+# SYCL_TARGET    - fsycl-targets value, auto-set by 'target' variable
+#
+# Usage:
+#   make oneccl target=nvidia   (default, NVIDIA GPU via CUDA)
+#   make oneccl target=amd      (AMD GPU via HIP/ROCm)
+#   make oneccl target=intel    (Intel GPU via Level Zero)
 ONECCL_CXX  ?= $(or $(DPCPP_CLANGXX),icpx)
-SYCL_TARGET ?= nvptx64-nvidia-cuda
+
+target ?= nvidia
+ifeq ($(target),amd)
+    SYCL_TARGET    := amdgcn-amd-amdhsa
+    SYCL_AMD_ARCH  ?= gfx908
+    ONECCL_EXTRA   := -Xsycl-target-backend --offload-arch=$(SYCL_AMD_ARCH)
+else ifeq ($(target),intel)
+    SYCL_TARGET    := spir64
+    ONECCL_EXTRA   :=
+else
+    # nvidia (default)
+    SYCL_TARGET    ?= nvptx64-nvidia-cuda
+    ONECCL_EXTRA   :=
+endif
 
 # ============== NCCL ==============
 NCCL_SRC_DIR   := src/nccl
@@ -47,16 +65,34 @@ else
 ONECCL_TARGETS := $(addprefix $(ONECCL_BUILD_DIR)/,$(oneccl_collective))
 endif
 
+# ============== RCCL ==============
+RCCL_SRC_DIR   := src/rccl
+RCCL_BUILD_DIR := build/rccl
+HIPCC          ?= hipcc
+ROCM_PATH      ?= /opt/rocm
+RCCL_CFLAGS    := -I$(ROCM_PATH)/include
+RCCL_LDFLAGS   := -L$(ROCM_PATH)/lib -Wl$(comma)-rpath$(comma)$(ROCM_PATH)/lib
+RCCL_LIBS      := $(RCCL_CFLAGS) $(RCCL_LDFLAGS) -Wno-unused-result -lmpi -lrccl $(COMMON_INC)
+
+rccl_collective ?= all
+ifeq ($(rccl_collective),all)
+RCCL_TARGETS := $(addprefix $(RCCL_BUILD_DIR)/,$(COLLECTIVES))
+else
+RCCL_TARGETS := $(addprefix $(RCCL_BUILD_DIR)/,$(rccl_collective))
+endif
+
 # ============== Targets principali ==============
-.PHONY: nccl oneccl clean dirs
+.PHONY: nccl oneccl rccl clean dirs
 
 nccl: dirs $(NCCL_TARGETS)
 oneccl: dirs $(ONECCL_TARGETS)
+rccl: dirs $(RCCL_TARGETS)
 
 # ============== Creazione cartelle ==============
 dirs:
 	@mkdir -p $(NCCL_BUILD_DIR)
 	@mkdir -p $(ONECCL_BUILD_DIR)
+	@mkdir -p $(RCCL_BUILD_DIR)
 
 # ============== Regole dinamiche NCCL ==============
 $(foreach c,$(COLLECTIVES),\
@@ -66,7 +102,12 @@ $(foreach c,$(COLLECTIVES),\
 # ============== Regole dinamiche OneCCL ==============
 $(foreach c,$(COLLECTIVES),\
   $(eval $(ONECCL_BUILD_DIR)/$(c): $(ONECCL_SRC_DIR)/$(c)/$(c).cpp ; \
-    $(ONECCL_CXX) -std=c++17 -fsycl -fsycl-targets=$(SYCL_TARGET) $(ONECCL_LIBS) $$< -o $$@))
+    $(ONECCL_CXX) -std=c++17 -fsycl -fsycl-targets=$(SYCL_TARGET) $(ONECCL_EXTRA) $(ONECCL_LIBS) $$< -o $$@))
+
+# ============== Regole dinamiche RCCL ==============
+$(foreach c,$(COLLECTIVES),\
+  $(eval $(RCCL_BUILD_DIR)/$(c): $(RCCL_SRC_DIR)/$(c)/$(c).cpp ; \
+    $(HIPCC) $(RCCL_LIBS) $$< -o $$@))
 
 # ============== Clean ==============
 clean:

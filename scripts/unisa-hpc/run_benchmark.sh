@@ -3,13 +3,15 @@
 #
 # Usage: ./run_benchmark.sh <library> <collective> <dtype>
 # Esempio: ./run_benchmark.sh nccl allreduce float
+# Multi-nodo: PPN=4 NUM_GPUS=8 ./run_benchmark.sh oneccl-nvidia allreduce float
 #
 # NOTA: Eseguire all'interno di una sessione srun interattiva, dopo aver fatto:
 #   source /home/S.SIRICA3/scripts/export_variables.sh
 #
 # Variabili di ambiente opzionali:
-#   NUM_GPUS     - Numero di GPU/rank MPI (default: 2)
+#   NUM_GPUS     - Numero di GPU/rank MPI (default: 4)
 #   NUM_ITERS    - Numero di iterazioni per ogni size (default: 5)
+#   PPN          - Processi per nodo per multi-nodo (se impostato, aggiunge -ppn a mpirun)
 #   PROJECT_ROOT - Root del progetto (default: /home/S.SIRICA3/multi-gpu-collectives)
 
 set -euo pipefail
@@ -18,13 +20,14 @@ set -euo pipefail
 if [ $# -lt 3 ]; then
     echo "Usage: $0 <library> <collective> <dtype>"
     echo ""
-    echo "  library:    nccl | oneccl"
+    echo "  library:    nccl | oneccl | oneccl-nvidia"
     echo "  collective: allreduce | alltoall"
     echo "  dtype:      int | float | double"
     echo ""
     echo "Variabili di ambiente opzionali:"
-    echo "  NUM_GPUS=4       Numero di GPU (default: 2)"
+    echo "  NUM_GPUS=4       Numero di GPU (default: 4)"
     echo "  NUM_ITERS=5      Iterazioni per size (default: 5)"
+    echo "  PPN=4            Processi per nodo (multi-nodo)"
     echo "  PROJECT_ROOT=... Root del progetto"
     exit 1
 fi
@@ -34,11 +37,12 @@ COLLECTIVE="$2"
 DTYPE="$3"
 NUM_GPUS="${NUM_GPUS:-4}"
 NUM_ITERS="${NUM_ITERS:-5}"
+PPN="${PPN:-}"
 PROJECT_ROOT="${PROJECT_ROOT:-/home/S.SIRICA3/multi-gpu-collectives}"
 
 # ===================== Validazione =====================
-if [[ "$LIBRARY" != "nccl" && "$LIBRARY" != "oneccl" ]]; then
-    echo "Errore: library deve essere 'nccl' o 'oneccl', ricevuto: '$LIBRARY'"
+if [[ "$LIBRARY" != "nccl" && "$LIBRARY" != "oneccl" && "$LIBRARY" != "oneccl-nvidia" ]]; then
+    echo "Errore: library deve essere 'nccl', 'oneccl' o 'oneccl-nvidia', ricevuto: '$LIBRARY'"
     exit 1
 fi
 
@@ -63,8 +67,14 @@ if [ ! -x "$BINARY" ]; then
     exit 1
 fi
 
+# ===================== Costruzione comando mpirun =====================
+MPIRUN_ARGS="-np $NUM_GPUS"
+if [ -n "$PPN" ]; then
+    MPIRUN_ARGS="-ppn $PPN $MPIRUN_ARGS"
+fi
+
 # ===================== Output directory =====================
-OUTPUT_DIR="${PROJECT_ROOT}/results/unisa-hpc/${LIBRARY}"
+OUTPUT_DIR="${PROJECT_ROOT}/results/unisa-hpc/${NUM_GPUS}_rank/${LIBRARY}"
 mkdir -p "$OUTPUT_DIR"
 
 # ===================== Minimo count per collettiva =====================
@@ -84,8 +94,8 @@ SIZES_LABEL=("1B" "8B" "64B" "512B" "4KiB" "32KiB" "256KiB" "2MiB" "16MiB" "128M
 # ===================== Header =====================
 echo "============================================================"
 echo " Benchmark: ${LIBRARY} | ${COLLECTIVE} | ${DTYPE}"
-echo " GPU: ${NUM_GPUS} | Iterazioni per size: ${NUM_ITERS}"
-echo " Binario: ${BINARY}"
+echo " Ranks: ${NUM_GPUS} | PPN: ${PPN:-N/A} | Iterazioni: ${NUM_ITERS}"
+echo " mpirun: mpirun ${MPIRUN_ARGS} ${BINARY} ..."
 echo " Output:  ${OUTPUT_DIR}"
 echo "============================================================"
 echo ""
@@ -112,7 +122,7 @@ for i in "${!SIZES_BYTES[@]}"; do
 
     for iter in $(seq 1 "$NUM_ITERS"); do
         echo -n "  [${iter}/${NUM_ITERS}] "
-        if ! mpirun -np "$NUM_GPUS" "$BINARY" --dtype "$DTYPE" --count "$COUNT" --output "$OUTPUT_DIR" 2>&1; then
+        if ! mpirun $MPIRUN_ARGS "$BINARY" --dtype "$DTYPE" --count "$COUNT" --output "$OUTPUT_DIR" 2>&1; then
             echo "  [ERRORE] Iterazione ${iter} per ${LABEL} fallita"
             ((FAILED++)) || true
         fi

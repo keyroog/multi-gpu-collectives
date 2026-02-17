@@ -1,13 +1,13 @@
 #include "../common/oneccl_context.hpp"
 #include "oneapi/ccl.hpp"  // retain for run_allreduce
-#include <chrono>                    // <<< aggiunto
+#include <mpi.h>
 #include "../../common/include/arg_parser.hpp"
 #include "../../common/include/logger.hpp"
 #include <string>
 
 template <typename T>
 void run_allreduce(size_t local_count, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream,
-                  Logger& logger, const std::string& data_type, ccl::datatype ccl_dtype) {
+                  Logger& logger, const std::string& data_type, ccl::datatype ccl_dtype, double init_time_ms) {
     // allocate device buffers
     auto send_buf = sycl::malloc_device<T>(local_count, q);
     auto recv_buf = sycl::malloc_device<T>(local_count, q);
@@ -27,11 +27,11 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     q.wait();
 
     // perform allreduce (use void* API with explicit datatype for NCCL backend compatibility)
-    auto t_start = std::chrono::high_resolution_clock::now();
+    double t_start = MPI_Wtime();
     ccl::allreduce(send_buf, recv_buf, local_count, ccl_dtype, ccl::reduction::sum, comm, stream).wait();
     q.wait();
-    auto t_end = std::chrono::high_resolution_clock::now();
-    auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
+    double t_end = MPI_Wtime();
+    double elapsed_ms = (t_end - t_start) * 1000.0;
     
     std::cout << "Rank " << rank << " allreduce time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     // correctness check
@@ -61,7 +61,7 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
             std::cout << "FAILED\n";
         }
     }
-    logger.log_result(data_type, global_count, size, rank, ok, elapsed_ms);
+    logger.log_result(data_type, global_count, size, rank, ok, init_time_ms, elapsed_ms);
     sycl::free(send_buf, q);
     sycl::free(recv_buf, q);
 }
@@ -124,11 +124,11 @@ int main(int argc, char* argv[]) {
 
     // dispatch based on dtype, usando local_count
     if (dtype == "int") {
-        run_allreduce<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::int32);
+        run_allreduce<int>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::int32, ctx.init_time_ms);
     } else if (dtype == "float") {
-        run_allreduce<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float32);
+        run_allreduce<float>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float32, ctx.init_time_ms);
     } else if (dtype == "double") {
-        run_allreduce<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float64);
+        run_allreduce<double>(local_count, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float64, ctx.init_time_ms);
     } else {
         if (rank == 0) {
             std::cerr << "Unsupported dtype: " << dtype << std::endl;
@@ -136,5 +136,6 @@ int main(int argc, char* argv[]) {
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
+    finalize_oneccl(ctx);
     return 0;
 }

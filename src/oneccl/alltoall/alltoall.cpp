@@ -1,14 +1,14 @@
 #include "../common/oneccl_context.hpp"
 #include "oneapi/ccl.hpp"
-#include <chrono>
+#include <mpi.h>
 #include "../../common/include/arg_parser.hpp"
 #include "../../common/include/logger.hpp"
 #include <string>
 #include <iomanip>
 
 template <typename T>
-void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream, 
-                  Logger& logger, const std::string& data_type, ccl::datatype ccl_dtype) {
+void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank, ccl::communicator& comm, sycl::queue& q, ccl::stream stream,
+                  Logger& logger, const std::string& data_type, ccl::datatype ccl_dtype, double init_time_ms) {
     // allocate device buffers
     // send_buf contains count*size elements (count elements for each destination rank)
     // recv_buf will contain count*size elements (count elements from each source rank)
@@ -36,12 +36,12 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
     ccl::alltoall((void*)send_buf, (void*)recv_buf, count_per_dest, ccl_dtype, comm, stream).wait();
     q.wait();
 
-    auto t_start = std::chrono::high_resolution_clock::now();
+    double t_start = MPI_Wtime();
     ccl::alltoall((void*)send_buf, (void*)recv_buf, count_per_dest, ccl_dtype, comm, stream).wait();
     q.wait();
-    auto t_end = std::chrono::high_resolution_clock::now();
-    
-    auto elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0;
+    double t_end = MPI_Wtime();
+
+    double elapsed_ms = (t_end - t_start) * 1000.0;
     
     std::cout << "Rank " << rank << " alltoall time: " << std::fixed << std::setprecision(3) << elapsed_ms << " ms\n";
     
@@ -78,7 +78,7 @@ void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank
             std::cout << "FAILED\n";
         }
     }
-    logger.log_result(data_type, global_count, size, rank, ok, elapsed_ms);
+    logger.log_result(data_type, global_count, size, rank, ok, init_time_ms, elapsed_ms);
     
     sycl::free(send_buf, q);
     sycl::free(recv_buf, q);
@@ -140,15 +140,16 @@ int main(int argc, char* argv[]) {
      
     // dispatch based on dtype
     if (dtype == "int") {
-        run_alltoall<int>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::int32);
+        run_alltoall<int>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::int32, ctx.init_time_ms);
     } else if (dtype == "float") {
-        run_alltoall<float>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float32);
+        run_alltoall<float>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float32, ctx.init_time_ms);
     } else if (dtype == "double") {
-        run_alltoall<double>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float64);
+        run_alltoall<double>(count_per_dest, effective_global_count, size, rank, comm, q, stream, logger, dtype, ccl::datatype::float64, ctx.init_time_ms);
     } else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
-    
+
+    finalize_oneccl(ctx);
     return 0;
 }

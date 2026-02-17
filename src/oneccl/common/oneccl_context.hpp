@@ -15,6 +15,7 @@ struct OneCCLContext {
     sycl::queue q;
     ccl::communicator comm;
     ccl::stream stream;
+    double init_time_ms;
     Logger logger;
 };
 
@@ -72,6 +73,7 @@ inline OneCCLContext init_oneccl(const std::string& output_dir,
     sycl::queue q(ctx, dev, { sycl::property::queue::in_order() });
 
     // KVS + communicator + stream
+    double t_init_start = MPI_Wtime();
     ccl::shared_ptr_class<ccl::kvs> kvs;
     ccl::kvs::address_type addr;
     if (rank == 0) { kvs = ccl::create_main_kvs(); addr = kvs->get_address(); }
@@ -82,7 +84,18 @@ inline OneCCLContext init_oneccl(const std::string& output_dir,
     auto ccl_ctx = ccl::create_context(q.get_context());
     auto comm    = ccl::create_communicator(size, rank, ccl_dev, ccl_ctx, kvs);
     auto stream  = ccl::create_stream(q);
+    double t_init_end = MPI_Wtime();
+    double init_time_ms = (t_init_end - t_init_start) * 1000.0;
 
     Logger logger(output_dir, "oneccl", collective_name);
-    return OneCCLContext{size, rank, std::move(q), std::move(comm), std::move(stream), std::move(logger)};
+    return OneCCLContext{size, rank, std::move(q), std::move(comm), std::move(stream), init_time_ms, std::move(logger)};
+}
+
+inline void finalize_oneccl(OneCCLContext& ctx) {
+    // Sincronizza tutti i rank prima del cleanup
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // OneCCL cleanup: stream, comm distrutti automaticamente (RAII)
+    // Ma dobbiamo fare MPI_Finalize
+    MPI_Finalize();
 }

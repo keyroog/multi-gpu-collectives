@@ -205,7 +205,7 @@ private:
     }
     
     void write_header(std::ofstream& file) const {
-        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,gpu_mode,test_passed,time_ms\n";
+        file << "timestamp,library,collective,data_type,message_size_bytes,message_size_elements,num_ranks,rank,hostname,node_id,total_nodes,is_multi_node,run_id,gpu_mode,test_passed,init_time_ms,time_ms\n";
     }
 
 public:
@@ -232,7 +232,7 @@ public:
         // env_vars = capture_env();
     }
     
-    void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, bool test_passed, double time_ms) {
+    void log_result(const std::string& data_type, size_t message_size_elements, int num_ranks, int rank, bool test_passed, double init_time_ms, double time_ms) {
         if (output_dir.empty()) {
             // Se non è specificato un output directory, non loggare su file
             return;
@@ -262,47 +262,57 @@ public:
         
         // Sincronizzazione per assicurare che l'header sia scritto prima dei dati
         MPI_Barrier(MPI_COMM_WORLD);
-        
-        // Ora tutti i rank possono scrivere i loro dati
-        std::ofstream file(filename, std::ios::app);
-        if (!file.is_open()) {
-            std::cerr << "Warning: Could not open log file: " << filename << std::endl;
-            return;
-        }
-        
-        // Calcola la dimensione in bytes (approssimativa)
+
+        // Calcola la dimensione in bytes
         size_t element_size = 0;
         if (data_type == "int") element_size = sizeof(int);
         else if (data_type == "float") element_size = sizeof(float);
         else if (data_type == "double") element_size = sizeof(double);
-        
+
         size_t message_size_bytes = message_size_elements * element_size;
-        
-        // Scrivi la riga di dati
-        file << get_timestamp() << ","
-             << library_name << ","
-             << collective_name << ","
-             << data_type << ","
-             << message_size_bytes << ","
-             << message_size_elements << ","
-             << num_ranks << ","
-             << rank << ","
-             << hostname << ","
-             << node_id << ","
-         << total_nodes << ","
-         << (is_multi_node ? "true" : "false") << ","
-         << run_id << ","
-         << gpu_mode << ","
-         << (test_passed ? "true" : "false") << ","
-         << std::fixed << std::setprecision(3) << time_ms << "\n";
-        
-        file.close();
+
+        // Prepara la riga in un buffer
+        std::ostringstream row;
+        row << get_timestamp() << ","
+            << library_name << ","
+            << collective_name << ","
+            << data_type << ","
+            << message_size_bytes << ","
+            << message_size_elements << ","
+            << num_ranks << ","
+            << rank << ","
+            << hostname << ","
+            << node_id << ","
+            << total_nodes << ","
+            << (is_multi_node ? "true" : "false") << ","
+            << run_id << ","
+            << gpu_mode << ","
+            << (test_passed ? "true" : "false") << ","
+            << std::fixed << std::setprecision(3) << init_time_ms << ","
+            << std::fixed << std::setprecision(3) << time_ms << "\n";
+        std::string row_str = row.str();
+
+        // Scrittura serializzata: ogni rank scrive uno alla volta
+        for (int r = 0; r < num_ranks; ++r) {
+            if (rank == r) {
+                std::ofstream file(filename, std::ios::app);
+                if (file.is_open()) {
+                    file << row_str;
+                    file.flush();
+                    file.close();
+                } else {
+                    std::cerr << "Warning: Could not open log file: " << filename << std::endl;
+                }
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
         
         // Log anche su console per debug
-        std::cout << "[LOG] " << library_name << " " << collective_name 
-                  << " " << data_type << " size=" << message_size_elements 
+        std::cout << "[LOG] " << library_name << " " << collective_name
+                  << " " << data_type << " size=" << message_size_elements
                   << " rank=" << rank << " hostname=" << hostname << " node=" << node_id
                   << " run=" << run_id << " gpu_mode=" << gpu_mode << " passed=" << (test_passed ? "true" : "false")
+                  << " init=" << init_time_ms << "ms"
                   << " time=" << time_ms << "ms" << " -> " << filename << std::endl;
     }
     
@@ -327,6 +337,6 @@ public:
         std::cout << "  --output <path>  : Directory path for logging results (optional)" << std::endl;
         std::cout << "  If --output is not specified, results will only be printed to console" << std::endl;
         std::cout << "\nOutput format: CSV files with columns:" << std::endl;
-        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, gpu_mode, test_passed, time_ms" << std::endl;
+        std::cout << "  timestamp, library, collective, data_type, message_size_bytes, message_size_elements, num_ranks, rank, hostname, node_id, total_nodes, is_multi_node, run_id, gpu_mode, test_passed, init_time_ms, time_ms" << std::endl;
     }
 };

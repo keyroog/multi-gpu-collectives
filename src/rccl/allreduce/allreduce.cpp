@@ -1,5 +1,5 @@
-// filepath: src/nccl/allreduce/allreduce.cpp
-#include "../common/nccl_context.hpp"
+// filepath: src/rccl/allreduce/allreduce.cpp
+#include "../common/rccl_context.hpp"
 #include "../../common/include/arg_parser.hpp"
 #include "../../common/include/logger.hpp"
 #include <mpi.h>
@@ -7,7 +7,7 @@
 #include <iomanip>
 #include <string>
 
-// Kernel to initialize device buffers
+// HIP kernel to initialize device buffers
 template<typename T>
 __global__ void init_buffers(T* send_buf, T* recv_buf, size_t count, int rank) {
     size_t id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -18,24 +18,24 @@ __global__ void init_buffers(T* send_buf, T* recv_buf, size_t count, int rank) {
 }
 
 template<typename T>
-void run_allreduce(size_t local_count, size_t global_count, int size, int rank, NcclContext& ctx, const std::string& data_type) {
-    // determine NCCL data type
+void run_allreduce(size_t local_count, size_t global_count, int size, int rank, RcclContext& ctx, const std::string& data_type) {
+    // determine RCCL data type (same API as NCCL)
     ncclDataType_t nccl_dtype;
     if (data_type == "int") nccl_dtype = ncclInt;
     else if (data_type == "float") nccl_dtype = ncclFloat;
     else /* double */ nccl_dtype = ncclDouble;
-    
+
     // allocate device buffers
     T* send_buf;
     T* recv_buf;
-    cudaMalloc(&send_buf, local_count * sizeof(T));
-    cudaMalloc(&recv_buf, local_count * sizeof(T));
+    hipMalloc(&send_buf, local_count * sizeof(T));
+    hipMalloc(&recv_buf, local_count * sizeof(T));
 
     // initialize buffers
     int threads = 256;
     int blocks = (local_count + threads - 1) / threads;
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, local_count, rank);
-    cudaStreamSynchronize(ctx.stream);
+    hipStreamSynchronize(ctx.stream);
 
     // compute expected sum
     T check_sum = static_cast<T>(0);
@@ -43,12 +43,12 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
 
     // warmup run (non cronometrata)
     ncclAllReduce(send_buf, recv_buf, local_count, nccl_dtype, ncclSum, ctx.comm, ctx.stream);
-    cudaStreamSynchronize(ctx.stream);
+    hipStreamSynchronize(ctx.stream);
 
     // perform allreduce and time it once
     double t_start = MPI_Wtime();
     ncclAllReduce(send_buf, recv_buf, local_count, nccl_dtype, ncclSum, ctx.comm, ctx.stream);
-    cudaStreamSynchronize(ctx.stream);
+    hipStreamSynchronize(ctx.stream);
     double t_end = MPI_Wtime();
     double elapsed_ms = (t_end - t_start) * 1000.0;
     std::cout << "Rank " << rank << " allreduce time: "
@@ -56,7 +56,7 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
 
     // correctness check
     T* host_buf = new T[local_count];
-    cudaMemcpy(host_buf, recv_buf, local_count * sizeof(T), cudaMemcpyDeviceToHost);
+    hipMemcpy(host_buf, recv_buf, local_count * sizeof(T), hipMemcpyDeviceToHost);
     bool ok = true;
     for (size_t i = 0; i < local_count; ++i) {
         if (host_buf[i] != check_sum) { ok = false; break; }
@@ -65,8 +65,8 @@ void run_allreduce(size_t local_count, size_t global_count, int size, int rank, 
     ctx.logger.log_result(data_type, global_count, size, rank, ok, ctx.init_time_ms, elapsed_ms);
     delete[] host_buf;
 
-    cudaFree(send_buf);
-    cudaFree(recv_buf);
+    hipFree(send_buf);
+    hipFree(recv_buf);
 }
 
 int main(int argc, char* argv[]) {
@@ -84,8 +84,8 @@ int main(int argc, char* argv[]) {
     }
     if (global_count == 0) global_count = 10 * 1024 * 1024;
 
-    // Initialize NCCL context
-    auto ctx = init_nccl(output_dir, "allreduce", argc, argv);  
+    // Initialize RCCL context
+    auto ctx = init_rccl(output_dir, "allreduce", argc, argv);
     int size = ctx.size;
     int rank = ctx.rank;
 
@@ -117,6 +117,6 @@ int main(int argc, char* argv[]) {
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
-    finalize_nccl(ctx);
+    finalize_rccl(ctx);
     return 0;
 }

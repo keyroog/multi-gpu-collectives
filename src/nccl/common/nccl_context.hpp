@@ -13,6 +13,7 @@ struct NcclContext {
     int device;
     ncclComm_t comm;
     cudaStream_t stream;
+    double init_time_ms;
     Logger logger;
 };
 
@@ -24,22 +25,33 @@ inline NcclContext init_nccl(const std::string& output_dir, const std::string& c
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     
-    // Select GPU device based on rank
+    // Get local rank (position within the node) for GPU selection
+    MPI_Comm local_comm;
+    int local_rank;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &local_comm);
+    MPI_Comm_rank(local_comm, &local_rank);
+    MPI_Comm_free(&local_comm);
+
+    // Select GPU device based on local rank
     int nDevices = 0;
     cudaGetDeviceCount(&nDevices);
-    if (nDevices < size) {
-        if (rank == 0) std::cerr << "Not enough GPUs for all ranks" << std::endl;
-        std::exit(EXIT_FAILURE);
+    if (nDevices < 1 || local_rank >= nDevices) {
+        std::cerr << "Rank " << rank << " (local " << local_rank
+                  << "): not enough GPUs (found " << nDevices << ")" << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
-    int device = rank % nDevices;
+    int device = local_rank;
     cudaSetDevice(device);
     
     // Create NCCL communicator
+    double t_init_start = MPI_Wtime();
     ncclUniqueId id;
     if (rank == 0) ncclGetUniqueId(&id);
     MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
     ncclComm_t comm;
     ncclCommInitRank(&comm, size, id, rank);
+    double t_init_end = MPI_Wtime();
+    double init_time_ms = (t_init_end - t_init_start) * 1000.0;
     
     // Create CUDA stream
     cudaStream_t stream;
@@ -47,17 +59,20 @@ inline NcclContext init_nccl(const std::string& output_dir, const std::string& c
     
     // Initialize logger
     Logger logger(output_dir, "nccl", collective_name);
-    
-    return NcclContext{size, rank, device, comm, stream, logger};
+
+    return NcclContext{size, rank, device, comm, stream, init_time_ms, logger};
 }
 
 inline void finalize_nccl(NcclContext& ctx) {
+    // Sincronizza tutti i rank prima del cleanup
+    MPI_Barrier(MPI_COMM_WORLD);
+
     // Destroy NCCL communicator
     ncclCommDestroy(ctx.comm);
-    
+
     // Destroy CUDA stream
     cudaStreamDestroy(ctx.stream);
-    
+
     // Finalize MPI
     MPI_Finalize();
 }
