@@ -10,6 +10,7 @@ import os
 import glob
 import argparse
 
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -73,7 +74,7 @@ def _make_plot(grouped: pd.DataFrame, metric: str, ylabel: str,
         ax.errorbar(
             lib_data["message_size_bytes"],
             lib_data["value"],
-            yerr=lib_data["std"],
+            yerr=lib_data["mad"],
             color=style["color"],
             marker=style["marker"],
             label=style["label"],
@@ -83,7 +84,7 @@ def _make_plot(grouped: pd.DataFrame, metric: str, ylabel: str,
         )
 
     ax.set_xscale("log", base=2)
-    ax.set_yscale("linear")
+    ax.set_yscale("log")
 
     present_sizes = sorted(grouped["message_size_bytes"].unique())
     ax.set_xticks(present_sizes)
@@ -105,6 +106,12 @@ def _make_plot(grouped: pd.DataFrame, metric: str, ylabel: str,
     print(f"Salvato: {out_path}")
 
 
+def _mad(series: pd.Series) -> float:
+    """Median Absolute Deviation."""
+    med = series.median()
+    return np.median(np.abs(series - med))
+
+
 def plot_comparison(df: pd.DataFrame, collective: str, dtype: str, out_dir: str):
     """Genera due grafici (tempo e goodput) per la coppia (collective, dtype)."""
     subset = df[(df["collective"] == collective) & (df["data_type"] == dtype)].copy()
@@ -116,41 +123,36 @@ def plot_comparison(df: pd.DataFrame, collective: str, dtype: str, out_dir: str)
     if subset.empty:
         return
 
-    # Goodput in Gb/s per ogni misurazione
-    subset["goodput_gbps"] = subset["message_size_bytes"] * 8 / (subset["time_ms"] * 1e6)
+    # Per ogni run, prendi il max time_ms tra i rank (= tempo reale della collettiva)
+    per_run = (
+        subset
+        .groupby(["library", "message_size_bytes", "run_id"])["time_ms"]
+        .max()
+        .reset_index()
+    )
+
+    # Goodput in Gb/s calcolato sul tempo per-run
+    per_run["goodput_gbps"] = per_run["message_size_bytes"] * 8 / (per_run["time_ms"] * 1e6)
 
     # --- Grafico 1: tempo (ms) ---
     grp_time = (
-        subset
+        per_run
         .groupby(["library", "message_size_bytes"])["time_ms"]
-        .agg(["median", "std"])
+        .agg(value="median", mad=_mad)
         .reset_index()
     )
-    grp_time.rename(columns={"median": "value"}, inplace=True)
     _make_plot(grp_time, "time_ms", "Time (ms)",
                collective, dtype, "time", out_dir)
 
     # --- Grafico 2: goodput (Gb/s) ---
     grp_goodput = (
-        subset
+        per_run
         .groupby(["library", "message_size_bytes"])["goodput_gbps"]
-        .agg(["median", "std"])
+        .agg(value="median", mad=_mad)
         .reset_index()
     )
-    grp_goodput.rename(columns={"median": "value"}, inplace=True)
     _make_plot(grp_goodput, "goodput_gbps", "Goodput (Gb/s)",
                collective, dtype, "goodput", out_dir)
-
-    # --- Grafico 3: initialization time (ms) ---
-    grp_init = (
-        subset
-        .groupby(["library", "message_size_bytes"])["init_time_ms"]
-        .agg(["median", "std"])
-        .reset_index()
-    )
-    grp_init.rename(columns={"median": "value"}, inplace=True)
-    _make_plot(grp_init, "init_time_ms", "Initialization Time (ms)",
-               collective, dtype, "init", out_dir)
 
 
 def main():
@@ -183,7 +185,7 @@ def main():
             plot_comparison(df, collective, dtype, args.out_dir)
 
     n_pairs = len(collectives) * len(dtypes)
-    print(f"\nCompletato. {n_pairs} coppie, {n_pairs * 3} grafici in {args.out_dir}/")
+    print(f"\nCompletato. {n_pairs} coppie, {n_pairs * 2} grafici in {args.out_dir}/")
 
 
 if __name__ == "__main__":

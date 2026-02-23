@@ -84,9 +84,9 @@ endif
 # ============== Targets principali ==============
 .PHONY: nccl oneccl rccl clean dirs
 
-nccl: dirs $(NCCL_TARGETS)
-oneccl: dirs $(ONECCL_TARGETS)
-rccl: dirs $(RCCL_TARGETS)
+nccl: dirs $(NCCL_TARGETS) $(NCCL_BUILD_DIR)/init_time
+oneccl: dirs $(ONECCL_TARGETS) $(ONECCL_BUILD_DIR)/init_time
+rccl: dirs $(RCCL_TARGETS) $(RCCL_BUILD_DIR)/init_time
 
 # ============== Creazione cartelle ==============
 dirs:
@@ -108,6 +108,16 @@ $(foreach c,$(COLLECTIVES),\
 $(foreach c,$(COLLECTIVES),\
   $(eval $(RCCL_BUILD_DIR)/$(c): $(RCCL_SRC_DIR)/$(c)/$(c).cpp ; \
     $(HIPCC) $(RCCL_LIBS) $$< -o $$@))
+
+# ============== init_time targets (one per library, standalone binary) ==============
+$(NCCL_BUILD_DIR)/init_time: $(NCCL_SRC_DIR)/init_time/init_time.cu
+	$(NVCC) $(NCCL_LIBS) $< -o $@
+
+$(ONECCL_BUILD_DIR)/init_time: $(ONECCL_SRC_DIR)/init_time/init_time.cpp
+	$(ONECCL_CXX) -std=c++17 -fsycl -fsycl-targets=$(SYCL_TARGET) $(ONECCL_EXTRA) $(ONECCL_LIBS) $< -o $@
+
+$(RCCL_BUILD_DIR)/init_time: $(RCCL_SRC_DIR)/init_time/init_time.cpp
+	$(HIPCC) $(RCCL_LIBS) $< -o $@
 
 # ============== Clean ==============
 clean:
