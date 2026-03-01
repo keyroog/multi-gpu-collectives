@@ -20,7 +20,7 @@ set -euo pipefail
 if [ $# -lt 3 ]; then
     echo "Usage: $0 <library> <collective> <dtype>"
     echo ""
-    echo "  library:    nccl | oneccl | oneccl-nvidia"
+    echo "  library:    nccl | rccl | oneccl | oneccl-nvidia"
     echo "  collective: allreduce | alltoall"
     echo "  dtype:      int | float | double"
     echo ""
@@ -41,8 +41,8 @@ PPN="${PPN:-}"
 PROJECT_ROOT="${PROJECT_ROOT:-/home/S.SIRICA3/multi-gpu-collectives}"
 
 # ===================== Validazione =====================
-if [[ "$LIBRARY" != "nccl" && "$LIBRARY" != "oneccl" && "$LIBRARY" != "oneccl-nvidia" ]]; then
-    echo "Errore: library deve essere 'nccl', 'oneccl' o 'oneccl-nvidia', ricevuto: '$LIBRARY'"
+if [[ "$LIBRARY" != "nccl" && "$LIBRARY" != "rccl" && "$LIBRARY" != "oneccl" && "$LIBRARY" != "oneccl-nvidia" ]]; then
+    echo "Errore: library deve essere 'nccl', 'rccl', 'oneccl' o 'oneccl-nvidia', ricevuto: '$LIBRARY'"
     exit 1
 fi
 
