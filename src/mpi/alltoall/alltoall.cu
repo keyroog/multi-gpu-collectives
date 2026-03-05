@@ -1,5 +1,5 @@
-// filepath: src/nccl/alltoall/alltoall.cu
-#include "../common/nccl_context.hpp"
+// filepath: src/mpi/alltoall/alltoall.cu
+#include "../common/mpi_context.hpp"
 #include "../../common/include/arg_parser.hpp"
 #include "../../common/include/logger.hpp"
 #include <mpi.h>
@@ -7,7 +7,6 @@
 #include <iomanip>
 #include <string>
 
-// Kernel to initialize device buffers for alltoall
 template<typename T>
 __global__ void init_buffers(T* send_buf, T* recv_buf, size_t count, int rank, int size) {
     size_t id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -21,43 +20,33 @@ __global__ void init_buffers(T* send_buf, T* recv_buf, size_t count, int rank, i
 }
 
 template<typename T>
-void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank, NcclContext& ctx, const std::string& data_type) {
-    // determine NCCL data type
-    ncclDataType_t nccl_dtype;
-    if (data_type == "int") nccl_dtype = ncclInt;
-    else if (data_type == "float") nccl_dtype = ncclFloat;
-    else /* double */ nccl_dtype = ncclDouble;
+MPI_Datatype mpi_dtype_of();
+template<> MPI_Datatype mpi_dtype_of<int>()    { return MPI_INT; }
+template<> MPI_Datatype mpi_dtype_of<float>()  { return MPI_FLOAT; }
+template<> MPI_Datatype mpi_dtype_of<double>() { return MPI_DOUBLE; }
 
-    // allocate device buffers
+template<typename T>
+void run_alltoall(size_t count_per_dest, size_t global_count, int size, int rank, MpiContext& ctx, const std::string& data_type) {
     T* send_buf;
     T* recv_buf;
     cudaMalloc(&send_buf, count_per_dest * size * sizeof(T));
     cudaMalloc(&recv_buf, count_per_dest * size * sizeof(T));
 
-    // initialize buffers
     int threads = 256;
     int blocks = (count_per_dest * size + threads - 1) / threads;
     init_buffers<T><<<blocks, threads, 0, ctx.stream>>>(send_buf, recv_buf, count_per_dest, rank, size);
     cudaStreamSynchronize(ctx.stream);
 
-    // alltoall via send/recv loop
-    auto do_alltoall = [&]() {
-        ncclGroupStart();
-        for (int i = 0; i < size; ++i) {
-            ncclSend(send_buf + i * count_per_dest, count_per_dest, nccl_dtype, i, ctx.comm, ctx.stream);
-            ncclRecv(recv_buf + i * count_per_dest, count_per_dest, nccl_dtype, i, ctx.comm, ctx.stream);
-        }
-        ncclGroupEnd();
-    };
+    MPI_Datatype dtype = mpi_dtype_of<T>();
 
-    // warmup run (non cronometrata)
-    do_alltoall();
+    // warmup
     cudaStreamSynchronize(ctx.stream);
+    MPI_Alltoall(send_buf, count_per_dest, dtype, recv_buf, count_per_dest, dtype, MPI_COMM_WORLD);
 
-    // perform alltoall and time it once
+    // timed run
+    cudaStreamSynchronize(ctx.stream);
     double t_start = MPI_Wtime();
-    do_alltoall();
-    cudaStreamSynchronize(ctx.stream);
+    MPI_Alltoall(send_buf, count_per_dest, dtype, recv_buf, count_per_dest, dtype, MPI_COMM_WORLD);
     double t_end = MPI_Wtime();
     double elapsed_ms = (t_end - t_start) * 1000.0;
     std::cout << "Rank " << rank << " alltoall time: "
@@ -89,15 +78,10 @@ int main(int argc, char* argv[]) {
     std::string dtype = parser.get<std::string>("--dtype");
     size_t global_count = parser.get<size_t>("--count");
     std::string output_dir;
-    try {
-        output_dir = parser.get<std::string>("--output");
-    } catch (...) {
-        output_dir = "";
-    }
+    try { output_dir = parser.get<std::string>("--output"); } catch (...) { output_dir = ""; }
     if (global_count == 0) global_count = 1024 * 1024;
 
-    // Initialize NCCL context for alltoall
-    auto ctx = init_nccl(output_dir, "alltoall", argc, argv);
+    auto ctx = init_mpi(output_dir, "alltoall", argc, argv);
     int size = ctx.size;
     int rank = ctx.rank;
 
@@ -106,9 +90,7 @@ int main(int argc, char* argv[]) {
     size_t remainder      = global_count % denom;
     size_t effective_global = count_per_dest * denom;
     if (count_per_dest == 0) {
-        if (rank == 0) {
-            std::cerr << "Global count too small for size=" << size << " (needs at least size^2 elements).\n";
-        }
+        if (rank == 0) std::cerr << "Global count too small for size=" << size << " (needs at least size^2 elements).\n";
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
     if (rank == 0 && remainder != 0) {
@@ -118,18 +100,14 @@ int main(int argc, char* argv[]) {
                   << " and ignoring last " << remainder << " elements.\n";
     }
 
-    // dispatch based on data type
-    if (dtype == "int") {
-        run_alltoall<int>(count_per_dest, effective_global, size, rank, ctx, dtype);
-    } else if (dtype == "float") {
-        run_alltoall<float>(count_per_dest, effective_global, size, rank, ctx, dtype);
-    } else if (dtype == "double") {
-        run_alltoall<double>(count_per_dest, effective_global, size, rank, ctx, dtype);
-    } else {
+    if      (dtype == "int")    run_alltoall<int>   (count_per_dest, effective_global, size, rank, ctx, dtype);
+    else if (dtype == "float")  run_alltoall<float> (count_per_dest, effective_global, size, rank, ctx, dtype);
+    else if (dtype == "double") run_alltoall<double>(count_per_dest, effective_global, size, rank, ctx, dtype);
+    else {
         std::cerr << "Unsupported dtype: " << dtype << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
-    finalize_nccl(ctx);
+    finalize_mpi(ctx);
     return 0;
 }

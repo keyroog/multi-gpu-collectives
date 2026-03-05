@@ -8,6 +8,7 @@ comma := ,
 # ============== Toolchain (from environment, override via make VAR=...) ==============
 # NCCL
 NVCC       ?= nvcc
+NVCC_ARCH  ?= sm_80
 # NCCL_ROOT  - root of NCCL installation (expects include/ and lib/ subdirs)
 
 # DPC++ / oneCCL
@@ -33,7 +34,8 @@ else ifeq ($(target),intel)
 else
     # nvidia (default)
     SYCL_TARGET    ?= nvptx64-nvidia-cuda
-    ONECCL_EXTRA   :=
+    NVIDIA_GPU_ARCH ?= sm_80
+    ONECCL_EXTRA   := -Xsycl-target-backend "--cuda-gpu-arch=$(NVIDIA_GPU_ARCH)"
 endif
 
 # ============== NCCL ==============
@@ -41,7 +43,7 @@ NCCL_SRC_DIR   := src/nccl
 NCCL_BUILD_DIR := build/nccl
 NCCL_CFLAGS    := $(if $(NCCL_ROOT),-I$(NCCL_ROOT)/include)
 NCCL_LDFLAGS   := $(if $(NCCL_ROOT),-L$(NCCL_ROOT)/lib -Xlinker -rpath -Xlinker $(NCCL_ROOT)/lib)
-NCCL_LIBS      := $(NCCL_CFLAGS) $(NCCL_LDFLAGS) -lmpi -lnvidia-ml -lnccl $(COMMON_INC)
+NCCL_LIBS      := -arch=$(NVCC_ARCH) $(NCCL_CFLAGS) $(NCCL_LDFLAGS) -lmpi -lnvidia-ml -lnccl $(COMMON_INC)
 
 nccl_collective ?= all
 ifeq ($(nccl_collective),all)
@@ -57,12 +59,25 @@ ONECCL_CFLAGS    := $(if $(ONECCL_INSTALL),-I$(ONECCL_INSTALL)/include)
 ONECCL_LDFLAGS   := $(if $(ONECCL_INSTALL),-L$(ONECCL_INSTALL)/lib -Wl$(comma)-rpath$(comma)$(ONECCL_INSTALL)/lib)
 ONECCL_LDFLAGS   += $(if $(DPCPP_LIB),-L$(DPCPP_LIB) -Wl$(comma)-rpath$(comma)$(DPCPP_LIB))
 ONECCL_LIBS      := $(ONECCL_CFLAGS) $(ONECCL_LDFLAGS) -lmpi -lccl $(COMMON_INC)
+ONECCL_LDLIBS    := -lstdc++fs
 
 oneccl_collective ?= all
 ifeq ($(oneccl_collective),all)
 ONECCL_TARGETS := $(addprefix $(ONECCL_BUILD_DIR)/,$(COLLECTIVES))
 else
 ONECCL_TARGETS := $(addprefix $(ONECCL_BUILD_DIR)/,$(oneccl_collective))
+endif
+
+# ============== MPI ==============
+MPI_SRC_DIR   := src/mpi
+MPI_BUILD_DIR := build/mpi
+MPI_LIBS      := -arch=$(NVCC_ARCH) -lmpi $(COMMON_INC)
+
+mpi_collective ?= all
+ifeq ($(mpi_collective),all)
+MPI_TARGETS := $(addprefix $(MPI_BUILD_DIR)/,$(COLLECTIVES))
+else
+MPI_TARGETS := $(addprefix $(MPI_BUILD_DIR)/,$(mpi_collective))
 endif
 
 # ============== RCCL ==============
@@ -82,16 +97,18 @@ RCCL_TARGETS := $(addprefix $(RCCL_BUILD_DIR)/,$(rccl_collective))
 endif
 
 # ============== Targets principali ==============
-.PHONY: nccl oneccl rccl clean dirs
+.PHONY: nccl oneccl mpi rccl clean dirs
 
 nccl: dirs $(NCCL_TARGETS) $(NCCL_BUILD_DIR)/init_time
 oneccl: dirs $(ONECCL_TARGETS) $(ONECCL_BUILD_DIR)/init_time
+mpi: dirs $(MPI_TARGETS) $(MPI_BUILD_DIR)/init_time
 rccl: dirs $(RCCL_TARGETS) $(RCCL_BUILD_DIR)/init_time
 
 # ============== Creazione cartelle ==============
 dirs:
 	@mkdir -p $(NCCL_BUILD_DIR)
 	@mkdir -p $(ONECCL_BUILD_DIR)
+	@mkdir -p $(MPI_BUILD_DIR)
 	@mkdir -p $(RCCL_BUILD_DIR)
 
 # ============== Regole dinamiche NCCL ==============
@@ -102,7 +119,12 @@ $(foreach c,$(COLLECTIVES),\
 # ============== Regole dinamiche OneCCL ==============
 $(foreach c,$(COLLECTIVES),\
   $(eval $(ONECCL_BUILD_DIR)/$(c): $(ONECCL_SRC_DIR)/$(c)/$(c).cpp ; \
-    $(ONECCL_CXX) -std=c++17 -fsycl -fsycl-targets=$(SYCL_TARGET) $(ONECCL_EXTRA) $(ONECCL_LIBS) $$< -o $$@))
+    $(ONECCL_CXX) -std=c++17 -fsycl -fsycl-targets=$(SYCL_TARGET) $(ONECCL_EXTRA) $(ONECCL_LIBS) $$< -o $$@ $(ONECCL_LDLIBS)))
+
+# ============== Regole dinamiche MPI ==============
+$(foreach c,$(COLLECTIVES),\
+  $(eval $(MPI_BUILD_DIR)/$(c): $(MPI_SRC_DIR)/$(c)/$(c).cu ; \
+    $(NVCC) $(MPI_LIBS) $$< -o $$@))
 
 # ============== Regole dinamiche RCCL ==============
 $(foreach c,$(COLLECTIVES),\
@@ -114,7 +136,10 @@ $(NCCL_BUILD_DIR)/init_time: $(NCCL_SRC_DIR)/init_time/init_time.cu
 	$(NVCC) $(NCCL_LIBS) $< -o $@
 
 $(ONECCL_BUILD_DIR)/init_time: $(ONECCL_SRC_DIR)/init_time/init_time.cpp
-	$(ONECCL_CXX) -std=c++17 -fsycl -fsycl-targets=$(SYCL_TARGET) $(ONECCL_EXTRA) $(ONECCL_LIBS) $< -o $@
+	$(ONECCL_CXX) -std=c++17 -fsycl -fsycl-targets=$(SYCL_TARGET) $(ONECCL_EXTRA) $(ONECCL_LIBS) $< -o $@ $(ONECCL_LDLIBS)
+
+$(MPI_BUILD_DIR)/init_time: $(MPI_SRC_DIR)/init_time/init_time.cu
+	$(NVCC) $(MPI_LIBS) $< -o $@
 
 $(RCCL_BUILD_DIR)/init_time: $(RCCL_SRC_DIR)/init_time/init_time.cpp
 	$(HIPCC) $(RCCL_LIBS) $< -o $@
