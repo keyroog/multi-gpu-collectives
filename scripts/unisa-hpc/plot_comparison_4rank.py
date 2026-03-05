@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 """
-Genera grafici di confronto NCCL vs oneCCL per ogni coppia (collettiva, dtype).
+Genera grafici di confronto NCCL vs oneCCL vs RCCL per ogni coppia (collettiva, dtype).
+Dati di riferimento: results/unisa-hpc/4_rank/
+  - NCCL e oneCCL: 4 rank
+  - RCCL:          8 rank su singolo nodo (nota esplicita nel grafico)
+
+Note sul formato RCCL:
+  - colonna tempo : time_ms_1coll  (vs time_ms di NCCL/oneCCL)
+  - nomi collettive abbreviati: ar→allreduce, a2a→alltoall
+  - dtype abbreviati: f→float, d→double, i→int
+  - file flat in rccl/, non struttura per collettiva/size
 
 Usage:
-    python scripts/unisa-hpc/plot_comparison.py
-    python scripts/unisa-hpc/plot_comparison.py --results-dir results/unisa-hpc --out-dir plots/unisa-hpc
+    python scripts/unisa-hpc/plot_comparison_4rank.py
+    python scripts/unisa-hpc/plot_comparison_4rank.py --results-dir results/unisa-hpc/4_rank --out-dir plots/unisa-hpc/4_rank
 """
 import os
 import glob
@@ -33,22 +42,29 @@ plt.rcParams.update({
     "lines.markersize":  28,
 })
 
-# Dimensioni target in bytes (quelle usate dallo script run_benchmark.sh)
-TARGET_SIZES_BYTES = [
-    1, 8, 64, 512,
-    4 * 1024,          # 4 KiB
-    32 * 1024,          # 32 KiB
-    256 * 1024,         # 256 KiB
-    2 * 1024**2,        # 2 MiB
-    16 * 1024**2,       # 16 MiB
-    128 * 1024**2,      # 128 MiB
-    1 * 1024**3,        # 1 GiB
-]
+RCCL_COLLECTIVE_MAP = {
+    "ar":     "allreduce",
+    "a2a":    "alltoall",
+    "bcast":  "broadcast",
+    "reduce": "reduce",
+    "gather": "gather",
+    "ag":     "allgather",
+}
+
+RCCL_DTYPE_MAP = {
+    "f": "float",
+    "d": "double",
+    "i": "int",
+    "h": "half",
+    "b": "bfloat16",
+}
 
 
 LIBRARY_STYLE = {
-    "nccl":   {"color": "#2ca02c", "marker": "s", "label": "NCCL"},
-    "oneccl": {"color": "#1f77b4", "marker": "o", "label": "oneCCL"},
+    "nccl":        {"color": "#2ca02c", "marker": "s", "label": "NCCL (4 ranks)"},
+    "oneccl":      {"color": "#1f77b4", "marker": "o", "label": "oneCCL NVIDIA (4 ranks)"},
+    "rccl":        {"color": "#d62728", "marker": "^", "label": "RCCL (8 ranks)"},
+    "oneccl-amd":  {"color": "#ff7f0e", "marker": "D", "label": "oneCCL AMD (8 ranks)"},
 }
 
 
@@ -59,8 +75,8 @@ def _fmt_size(b: int) -> str:
     return f"{b}B"
 
 
-def load_all_results(results_dir: str) -> pd.DataFrame:
-    """Carica tutti i CSV da results_dir/{nccl,oneccl}/{collective}/."""
+def load_nccl_oneccl(results_dir: str) -> pd.DataFrame:
+    """Carica tutti i CSV NCCL e oneCCL da results_dir/{nccl,oneccl}/{collective}/."""
     frames = []
     for library in ("nccl", "oneccl"):
         lib_dir = os.path.join(results_dir, library)
@@ -77,13 +93,51 @@ def load_all_results(results_dir: str) -> pd.DataFrame:
                 except Exception as e:
                     print(f"Warning: impossibile leggere {csv_path}: {e}")
     if not frames:
-        print(f"Nessun file CSV trovato in {results_dir}")
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
 
 
+def load_flat_csvs(results_dir: str, subdir: str, library_name: str) -> pd.DataFrame:
+    """Carica e normalizza CSV flat (formato RCCL/oneCCL-AMD) da results_dir/subdir/."""
+    src_dir = os.path.join(results_dir, subdir)
+    if not os.path.isdir(src_dir):
+        return pd.DataFrame()
+
+    frames = []
+    for csv_path in glob.glob(os.path.join(src_dir, "*.csv")):
+        try:
+            df = pd.read_csv(csv_path)
+            df = df.rename(columns={
+                "global_rank":   "rank",
+                "time_ms_1coll": "time_ms",
+            })
+            df["collective"] = df["collective"].map(lambda x: RCCL_COLLECTIVE_MAP.get(x, x))
+            df["data_type"]  = df["data_type"].map(lambda x: RCCL_DTYPE_MAP.get(x, x))
+            df["library"]    = library_name
+            frames.append(df)
+        except Exception as e:
+            print(f"Warning: impossibile leggere {csv_path}: {e}")
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def load_all_results(results_dir: str) -> pd.DataFrame:
+    main_df      = load_nccl_oneccl(results_dir)
+    rccl_df      = load_flat_csvs(results_dir, "rccl",       "rccl")
+    oneccl_amd   = load_flat_csvs(results_dir, "oneccl-amd", "oneccl-amd")
+    frames = [df for df in (main_df, rccl_df, oneccl_amd) if not df.empty]
+    if not frames:
+        print(f"Nessun file CSV trovato in {results_dir}")
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True)
+    # Mantieni solo le colonne necessarie per i plot
+    cols = ["library", "collective", "data_type", "message_size_bytes", "num_ranks", "rank", "run_id", "time_ms"]
+    return combined[[c for c in cols if c in combined.columns]]
+
+
 def _mad(series: pd.Series) -> float:
-    """Median Absolute Deviation."""
     med = series.median()
     return float(np.median(np.abs(series - med)))
 
@@ -91,7 +145,6 @@ def _mad(series: pd.Series) -> float:
 def _make_plot(grouped: pd.DataFrame, metric: str, ylabel: str,
                collective: str, dtype: str, suffix: str, out_dir: str,
                formats: list[str] | None = None, yscale: str = "log"):
-    """Genera un singolo grafico per la metrica indicata."""
     fig, ax = plt.subplots(figsize=(32, 20))
 
     for library, style in LIBRARY_STYLE.items():
@@ -137,17 +190,15 @@ def _make_plot(grouped: pd.DataFrame, metric: str, ylabel: str,
 
 def plot_comparison(df: pd.DataFrame, collective: str, dtype: str, out_dir: str,
                     formats: list[str] | None = None, yscale: str = "log"):
-    """Genera due grafici (tempo e goodput) per la coppia (collective, dtype)."""
     subset = df[(df["collective"] == collective) & (df["data_type"] == dtype)].copy()
     if subset.empty:
         return
-
-    # Filtra solo le size target
-    subset = subset[subset["message_size_bytes"].isin(TARGET_SIZES_BYTES)]
+    _sizes = sorted(subset["message_size_bytes"].unique())
+    subset = subset[subset["message_size_bytes"] > _sizes[1]]
     if subset.empty:
         return
 
-    # Per ogni run, prendi il max time_ms tra i rank (= tempo reale della collettiva)
+    # Per ogni run, prendi il max time_ms tra i rank (= wall-clock della collettiva)
     per_run = (
         subset
         .groupby(["library", "message_size_bytes", "run_id", "num_ranks"])["time_ms"]
@@ -155,8 +206,9 @@ def plot_comparison(df: pd.DataFrame, collective: str, dtype: str, out_dir: str,
         .reset_index()
     )
 
-    # Goodput in Gb/s calcolato sul tempo per-run (message_size_bytes / num_ranks = per-rank size)
-    per_run["goodput_gbps"] = (per_run["message_size_bytes"] / per_run["num_ranks"]) * 8 / (per_run["time_ms"] * 1e6)
+    per_run["goodput_gbps"] = (
+        (per_run["message_size_bytes"] / per_run["num_ranks"]) * 8 / (per_run["time_ms"] * 1e6)
+    )
 
     # --- Grafico 1: tempo (ms) ---
     grp_time = (
@@ -181,17 +233,17 @@ def plot_comparison(df: pd.DataFrame, collective: str, dtype: str, out_dir: str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Genera grafici di confronto NCCL vs oneCCL per collettiva e dtype."
+        description="Genera grafici di confronto NCCL vs oneCCL vs RCCL (4-rank run)."
     )
     parser.add_argument(
         "--results-dir",
-        default="results/unisa-hpc",
-        help="Directory radice dei risultati (default: results/unisa-hpc)",
+        default="results/unisa-hpc/4_rank",
+        help="Directory radice dei risultati (default: results/unisa-hpc/4_rank)",
     )
     parser.add_argument(
         "--out-dir",
-        default="plots/unisa-hpc",
-        help="Directory di output per i grafici (default: plots/unisa-hpc)",
+        default="plots/unisa-hpc/4_rank",
+        help="Directory di output per i grafici (default: plots/unisa-hpc/4_rank)",
     )
     parser.add_argument(
         "--format",
@@ -214,9 +266,8 @@ def main():
     if df.empty:
         return
 
-    # Genera un grafico per ogni coppia (collective, dtype)
     collectives = sorted(df["collective"].unique())
-    dtypes = sorted(df["data_type"].unique())
+    dtypes      = sorted(df["data_type"].unique())
 
     for collective in collectives:
         for dtype in dtypes:

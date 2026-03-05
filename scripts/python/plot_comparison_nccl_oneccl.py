@@ -3,8 +3,8 @@
 Genera grafici di confronto NCCL vs oneCCL per ogni coppia (collettiva, dtype).
 
 Usage:
-    python scripts/unisa-hpc/plot_comparison.py
-    python scripts/unisa-hpc/plot_comparison.py --results-dir results/unisa-hpc --out-dir plots/unisa-hpc
+    python scripts/python/plot_comparison_nccl_oneccl.py
+    python scripts/python/plot_comparison_nccl_oneccl.py --results-dir results/leonardo/4_rank --out-dir plots/leonardo
 """
 import os
 import glob
@@ -33,22 +33,20 @@ plt.rcParams.update({
     "lines.markersize":  28,
 })
 
-# Dimensioni target in bytes (quelle usate dallo script run_benchmark.sh)
-TARGET_SIZES_BYTES = [
-    1, 8, 64, 512,
-    4 * 1024,          # 4 KiB
-    32 * 1024,          # 32 KiB
-    256 * 1024,         # 256 KiB
-    2 * 1024**2,        # 2 MiB
-    16 * 1024**2,       # 16 MiB
-    128 * 1024**2,      # 128 MiB
-    1 * 1024**3,        # 1 GiB
-]
-
-
 LIBRARY_STYLE = {
     "nccl":   {"color": "#2ca02c", "marker": "s", "label": "NCCL"},
     "oneccl": {"color": "#1f77b4", "marker": "o", "label": "oneCCL"},
+}
+
+# Fattore alpha per il bus bandwidth: busbw = alpha * algbw
+# algbw = size / time,  busbw = alpha * size / time
+BUS_ALPHA = {
+    "allreduce":     lambda n: 2 * (n - 1) / n,
+    "alltoall":      lambda n: (n - 1) / n,
+    "allgather":     lambda n: (n - 1) / n,
+    "reducescatter": lambda n: (n - 1) / n,
+    "broadcast":     lambda n: (n - 1) / n,
+    "reduce":        lambda n: (n - 1) / n,
 }
 
 
@@ -83,7 +81,6 @@ def load_all_results(results_dir: str) -> pd.DataFrame:
 
 
 def _mad(series: pd.Series) -> float:
-    """Median Absolute Deviation."""
     med = series.median()
     return float(np.median(np.abs(series - med)))
 
@@ -91,7 +88,6 @@ def _mad(series: pd.Series) -> float:
 def _make_plot(grouped: pd.DataFrame, metric: str, ylabel: str,
                collective: str, dtype: str, suffix: str, out_dir: str,
                formats: list[str] | None = None, yscale: str = "log"):
-    """Genera un singolo grafico per la metrica indicata."""
     fig, ax = plt.subplots(figsize=(32, 20))
 
     for library, style in LIBRARY_STYLE.items():
@@ -136,18 +132,14 @@ def _make_plot(grouped: pd.DataFrame, metric: str, ylabel: str,
 
 
 def plot_comparison(df: pd.DataFrame, collective: str, dtype: str, out_dir: str,
-                    formats: list[str] | None = None, yscale: str = "log"):
-    """Genera due grafici (tempo e goodput) per la coppia (collective, dtype)."""
+                    formats: list[str] | None = None, yscale: str = "log",
+                    goodput_mode: str = "algbw"):
     subset = df[(df["collective"] == collective) & (df["data_type"] == dtype)].copy()
     if subset.empty:
         return
 
-    # Filtra solo le size target
-    subset = subset[subset["message_size_bytes"].isin(TARGET_SIZES_BYTES)]
-    if subset.empty:
-        return
-
     # Per ogni run, prendi il max time_ms tra i rank (= tempo reale della collettiva)
+    # num_ranks incluso nel groupby per poter calcolare busbw
     per_run = (
         subset
         .groupby(["library", "message_size_bytes", "run_id", "num_ranks"])["time_ms"]
@@ -155,10 +147,12 @@ def plot_comparison(df: pd.DataFrame, collective: str, dtype: str, out_dir: str,
         .reset_index()
     )
 
-    # Goodput in Gb/s calcolato sul tempo per-run (message_size_bytes / num_ranks = per-rank size)
-    per_run["goodput_gbps"] = (per_run["message_size_bytes"] / per_run["num_ranks"]) * 8 / (per_run["time_ms"] * 1e6)
+    per_run["algbw"] = (per_run["message_size_bytes"] / per_run["num_ranks"]) * 8 / (per_run["time_ms"] * 1e6)
 
-    # --- Grafico 1: tempo (ms) ---
+    if goodput_mode in ("busbw", "both"):
+        alpha_fn = BUS_ALPHA.get(collective, lambda n: 1.0)
+        per_run["busbw"] = per_run["algbw"] * per_run["num_ranks"].apply(alpha_fn)
+
     grp_time = (
         per_run
         .groupby(["library", "message_size_bytes"])["time_ms"]
@@ -168,15 +162,27 @@ def plot_comparison(df: pd.DataFrame, collective: str, dtype: str, out_dir: str,
     _make_plot(grp_time, "time_ms", "Time (ms)",
                collective, dtype, "time", out_dir, formats, yscale)
 
-    # --- Grafico 2: goodput (Gb/s) ---
-    grp_goodput = (
-        per_run
-        .groupby(["library", "message_size_bytes"])["goodput_gbps"]
-        .agg(value="median", mad=_mad)
-        .reset_index()
-    )
-    _make_plot(grp_goodput, "goodput_gbps", "Goodput (Gb/s)",
-               collective, dtype, "goodput", out_dir, formats, yscale)
+    if goodput_mode in ("algbw", "both"):
+        suffix  = "goodput_algbw" if goodput_mode == "both" else "goodput"
+        grp = (
+            per_run
+            .groupby(["library", "message_size_bytes"])["algbw"]
+            .agg(value="median", mad=_mad)
+            .reset_index()
+        )
+        _make_plot(grp, "algbw", "Goodput algbw (Gb/s)",
+                   collective, dtype, suffix, out_dir, formats, yscale)
+
+    if goodput_mode in ("busbw", "both"):
+        suffix = "goodput_busbw" if goodput_mode == "both" else "goodput"
+        grp = (
+            per_run
+            .groupby(["library", "message_size_bytes"])["busbw"]
+            .agg(value="median", mad=_mad)
+            .reset_index()
+        )
+        _make_plot(grp, "busbw", "Goodput busbw (Gb/s)",
+                   collective, dtype, suffix, out_dir, formats, yscale)
 
 
 def main():
@@ -185,13 +191,13 @@ def main():
     )
     parser.add_argument(
         "--results-dir",
-        default="results/unisa-hpc",
-        help="Directory radice dei risultati (default: results/unisa-hpc)",
+        default="results/leonardo/4_rank",
+        help="Directory radice dei risultati (default: results/leonardo/4_rank)",
     )
     parser.add_argument(
         "--out-dir",
-        default="plots/unisa-hpc",
-        help="Directory di output per i grafici (default: plots/unisa-hpc)",
+        default="plots/leonardo/nccl_vs_oneccl",
+        help="Directory di output per i grafici (default: plots/leonardo/nccl_vs_oneccl)",
     )
     parser.add_argument(
         "--format",
@@ -199,13 +205,20 @@ def main():
         nargs="+",
         default=["png"],
         choices=["png", "pdf", "svg"],
-        help="Formato/i di output (default: png). Es: --format pdf  o  --format png pdf",
+        help="Formato/i di output (default: png)",
     )
     parser.add_argument(
         "--yscale",
         default="log",
         choices=["log", "linear"],
         help="Scala dell'asse Y (default: log)",
+    )
+    parser.add_argument(
+        "--goodput-mode",
+        dest="goodput_mode",
+        default="algbw",
+        choices=["algbw", "busbw", "both"],
+        help="Metrica goodput: algbw (size/time), busbw (alpha*size/time), both (default: algbw)",
     )
     args = parser.parse_args()
 
@@ -214,13 +227,12 @@ def main():
     if df.empty:
         return
 
-    # Genera un grafico per ogni coppia (collective, dtype)
     collectives = sorted(df["collective"].unique())
     dtypes = sorted(df["data_type"].unique())
 
     for collective in collectives:
         for dtype in dtypes:
-            plot_comparison(df, collective, dtype, args.out_dir, args.formats, args.yscale)
+            plot_comparison(df, collective, dtype, args.out_dir, args.formats, args.yscale, args.goodput_mode)
 
     n_pairs = len(collectives) * len(dtypes)
     print(f"\nCompletato. {n_pairs} coppie, {n_pairs * 2} grafici in {args.out_dir}/")

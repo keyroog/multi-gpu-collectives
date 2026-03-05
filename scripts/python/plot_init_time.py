@@ -7,8 +7,8 @@ Usa max_init_ms (tempo collettivo = rank più lento), iter >= 1 (warmup escluso)
 Aggrega per mediana; error bar = IQR (25°–75° percentile).
 
 Usage:
-    python scripts/unisa-hpc/plot_init_time.py
-    python scripts/unisa-hpc/plot_init_time.py \
+    python scripts/python/plot_init_time.py
+    python scripts/python/plot_init_time.py \
         --results-base results/unisa-hpc --out-dir plots/unisa-hpc
 """
 
@@ -19,6 +19,23 @@ import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+
+plt.rcParams.update({
+    "font.size":         70,
+    "axes.labelsize":    76,
+    "xtick.labelsize":   66,
+    "ytick.labelsize":   66,
+    "legend.fontsize":   66,
+    "xtick.major.pad":   16,
+    "ytick.major.pad":   16,
+    "xtick.major.size":  16,
+    "ytick.major.size":  16,
+    "xtick.major.width":  3,
+    "ytick.major.width":  3,
+    "axes.linewidth":     3,
+    "axes.labelpad":     20,
+    "legend.framealpha": 0.9,
+})
 
 # ---- Stile barre -------------------------------------------------------------
 #   (library, num_ranks) -> (color, hatch, label)
@@ -135,9 +152,13 @@ def plot(df: pd.DataFrame, out_dir: str, formats: list[str] | None = None):
 # ---- Main --------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--results-base", default="results/unisa-hpc")
-    parser.add_argument("--out-dir",      default="plots/unisa-hpc")
+    parser = argparse.ArgumentParser(
+        description="Genera grafico a barre initialization time NCCL vs oneCCL."
+    )
+    parser.add_argument("--results-base", default="results/unisa-hpc",
+                        help="Directory base contenente *_rank/ (default: results/unisa-hpc)")
+    parser.add_argument("--out-dir", default="plots/unisa-hpc",
+                        help="Directory di output (default: plots/unisa-hpc)")
     parser.add_argument(
         "--format",
         dest="formats",
@@ -154,7 +175,6 @@ def main():
         print("Nessun file *_init_time_*ranks_results.csv trovato.")
         return
 
-    # riepilogo dati caricati
     print(df.groupby(["library", "num_ranks"])["max_init_ms"]
           .agg(n="count", median="median", std="std")
           .round(3)

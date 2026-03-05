@@ -70,7 +70,8 @@ def load_results(results_dir: str, num_ranks: int) -> pd.DataFrame:
 
 def _make_plot(grouped: pd.DataFrame, ylabel: str,
                library: str, collective: str, dtype: str,
-               suffix: str, out_dir: str):
+               suffix: str, out_dir: str,
+               formats: list[str] | None = None, yscale: str = "linear"):
     """Genera un singolo grafico di scalabilità."""
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -92,7 +93,7 @@ def _make_plot(grouped: pd.DataFrame, ylabel: str,
         )
 
     ax.set_xscale("log", base=2)
-    ax.set_yscale("linear")
+    ax.set_yscale(yscale)
 
     present_sizes = sorted(grouped["message_size_bytes"].unique())
     ax.set_xticks(present_sizes)
@@ -109,14 +110,17 @@ def _make_plot(grouped: pd.DataFrame, ylabel: str,
     ax.grid(True, which="both", linestyle="--", alpha=0.4)
 
     fig.tight_layout()
-    out_path = os.path.join(out_dir, f"{collective}_{dtype}_{library}_{suffix}.png")
-    fig.savefig(out_path, dpi=150)
+    for fmt in (formats or ["png"]):
+        out_path = os.path.join(out_dir, f"{collective}_{dtype}_{library}_{suffix}.{fmt}")
+        kwargs = {"dpi": 150} if fmt != "pdf" else {}
+        fig.savefig(out_path, **kwargs)
+        print(f"Salvato: {out_path}")
     plt.close(fig)
-    print(f"Salvato: {out_path}")
 
 
 def plot_scalability(df: pd.DataFrame, library: str,
-                     collective: str, dtype: str, out_dir: str):
+                     collective: str, dtype: str, out_dir: str,
+                     formats: list[str] | None = None, yscale: str = "linear"):
     """Genera grafici di scalabilità per la tripla (library, collective, dtype)."""
     subset = df[
         (df["library"] == library)
@@ -130,29 +134,36 @@ def plot_scalability(df: pd.DataFrame, library: str,
     if subset.empty:
         return
 
-    subset["goodput_gbps"] = subset["message_size_bytes"] * 8 / (subset["time_ms"] * 1e6)
+    # max tra rank per run → wall-clock reale della collettiva
+    per_run = (
+        subset
+        .groupby(["num_ranks_config", "message_size_bytes", "run_id"])["time_ms"]
+        .max()
+        .reset_index()
+    )
+    per_run["goodput_gbps"] = (per_run["message_size_bytes"] / per_run["num_ranks_config"]) * 8 / (per_run["time_ms"] * 1e6)
 
     # --- Grafico 1: tempo (ms) ---
     grp_time = (
-        subset
+        per_run
         .groupby(["num_ranks_config", "message_size_bytes"])["time_ms"]
         .agg(["median", "std"])
         .reset_index()
     )
     grp_time.rename(columns={"median": "value"}, inplace=True)
     _make_plot(grp_time, "Time (ms)",
-               library, collective, dtype, "time", out_dir)
+               library, collective, dtype, "time", out_dir, formats, yscale)
 
     # --- Grafico 2: goodput (Gb/s) ---
     grp_goodput = (
-        subset
+        per_run
         .groupby(["num_ranks_config", "message_size_bytes"])["goodput_gbps"]
         .agg(["median", "std"])
         .reset_index()
     )
     grp_goodput.rename(columns={"median": "value"}, inplace=True)
     _make_plot(grp_goodput, "Goodput (Gb/s)",
-               library, collective, dtype, "goodput", out_dir)
+               library, collective, dtype, "goodput", out_dir, formats, yscale)
 
     # --- Grafico 3: initialization time (ms) ---
     grp_init = (
@@ -163,7 +174,7 @@ def plot_scalability(df: pd.DataFrame, library: str,
     )
     grp_init.rename(columns={"median": "value"}, inplace=True)
     _make_plot(grp_init, "Initialization Time (ms)",
-               library, collective, dtype, "init", out_dir)
+               library, collective, dtype, "init", out_dir, formats, yscale)
 
 
 def main():
@@ -179,6 +190,20 @@ def main():
         "--out-dir",
         default="plots/unisa-hpc/scalability",
         help="Directory di output per i grafici (default: plots/unisa-hpc/scalability)",
+    )
+    parser.add_argument(
+        "--format",
+        dest="formats",
+        nargs="+",
+        default=["png"],
+        choices=["png", "pdf", "svg"],
+        help="Formato/i di output (default: png)",
+    )
+    parser.add_argument(
+        "--yscale",
+        default="linear",
+        choices=["log", "linear"],
+        help="Scala dell'asse Y (default: linear)",
     )
     args = parser.parse_args()
 
@@ -202,7 +227,7 @@ def main():
     for library in libraries:
         for collective in collectives:
             for dtype in dtypes:
-                plot_scalability(df, library, collective, dtype, args.out_dir)
+                plot_scalability(df, library, collective, dtype, args.out_dir, args.formats, args.yscale)
                 count += 1
 
     print(f"\nCompletato. {count} triple, {count * 3} grafici in {args.out_dir}/")
