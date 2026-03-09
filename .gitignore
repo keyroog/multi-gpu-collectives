@@ -40,5 +40,6 @@
 /dist
 /.vscode
 /results
+/src/test
 /src/oneccl/*_old
 /src/nccl/*_old

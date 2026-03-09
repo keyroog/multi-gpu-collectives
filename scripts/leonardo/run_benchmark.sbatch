@@ -2,7 +2,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=4
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=1
 #SBATCH --time=02:00:00
 #SBATCH --partition=boost_usr_prod
 #SBATCH --account=IscrC_HIGRAPH_0
