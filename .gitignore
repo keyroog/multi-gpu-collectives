@@ -40,3 +40,5 @@
 /dist
 /.vscode
 /results
+/src/oneccl/*_old
+/src/nccl/*_old
