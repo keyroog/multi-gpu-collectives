@@ -51,3 +51,11 @@
 # README plot previews
 !/plots/
 /plots/*
+!/plots/leonardo/
+/plots/leonardo/*
+!/plots/leonardo/nccl_vs_oneccl_4rank/
+/plots/leonardo/nccl_vs_oneccl_4rank/*
+!/plots/leonardo/nccl_vs_oneccl_4rank/allreduce_float_time.png
+!/plots/leonardo/nccl_vs_oneccl_4rank/allreduce_float_goodput.png
+!/plots/leonardo/nccl_vs_oneccl_4rank/alltoall_float_time.png
+!/plots/leonardo/nccl_vs_oneccl_4rank/alltoall_float_goodput.png
