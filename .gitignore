@@ -39,7 +39,15 @@
 /tmp
 /dist
 /.vscode
+/.vscode_old
+/.claude
 /results
+/scripts
+/scripts_old
 /src/test
 /src/oneccl/*_old
 /src/nccl/*_old
+
+# README plot previews
+!/plots/
+/plots/*
